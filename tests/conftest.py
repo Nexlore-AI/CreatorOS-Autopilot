@@ -36,3 +36,33 @@ def code_only(path) -> str:
 @pytest.fixture
 def repo():
     return REPO
+
+
+_TONE_CACHE: dict = {}
+
+
+def tone_bytes(seconds: float = 1.0) -> bytes:
+    """A real, decodable MP3 of the given length, for TTS test fakes.
+
+    `core.narrate` checks that a clip is long enough to plausibly be the line it claims to
+    be, because a backend handed a script its voice cannot pronounce exits 0 and writes a
+    valid but near-silent file. A fake that wrote a few raw bytes would pass the old size
+    check and fail this one — so the fakes produce genuine audio.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    key = round(seconds, 2)
+    if key in _TONE_CACHE:
+        return _TONE_CACHE[key]
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("ffmpeg is needed to build audio fixtures")
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "t.mp3"
+        subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-f", "lavfi",
+                        "-i", f"anullsrc=r=44100:cl=mono", "-t", f"{key}",
+                        "-c:a", "libmp3lame", "-b:a", "64k", str(out)], check=True)
+        _TONE_CACHE[key] = out.read_bytes()
+    return _TONE_CACHE[key]

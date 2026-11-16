@@ -17,7 +17,7 @@ from creatoros_autopilot.interfaces import (
     Availability, Gate, LLM, Publisher, PublishRequest, ResearchSource, Style, TTS,
 )
 
-from .conftest import PACKAGE, code_only
+from .conftest import PACKAGE, code_only, tone_bytes
 
 
 class TestRegistry:
@@ -141,7 +141,10 @@ class TestAcceptance:
                 return Availability.yes("always")
 
             def synthesize(self, text, out_path, *, voice="", model="", **options):
-                Path(out_path).write_bytes(text.upper().encode("utf-8"))
+                # Real audio, long enough to be plausible for the text. A fake that wrote
+                # a few bytes would pass a size check and fail the duration check that
+                # exists because backends do exactly that when they cannot speak a script.
+                Path(out_path).write_bytes(tone_bytes(seconds=max(0.5, len(text) * 0.05)))
                 return Path(out_path)
 
             def voices(self):
@@ -161,8 +164,9 @@ class TestAcceptance:
             # 3. The shared machinery works for it with no changes: caching, the
             #    manifest, stale-clip cleanup.
             first = narrate.narrate(spec, spec_path, backend)
-            assert first.ok and first.written == [1, 2]
-            assert (tmp_path / "01_t_vo" / "01.mp3").read_bytes() == b"HELLO"
+            assert first.ok, first.problems
+            assert first.written == [1, 2]
+            assert (tmp_path / "01_t_vo" / "01.mp3").stat().st_size > 0
 
             second = narrate.narrate(spec, spec_path, backend)
             assert second.written == [] and second.unchanged == [1, 2], \
@@ -182,13 +186,11 @@ class TestAcceptance:
             name, paid = "a", False
             def available(self): return Availability.yes()
             def synthesize(self, text, out_path, **k):
-                Path(out_path).write_bytes(b"a" * 16); return Path(out_path)
+                Path(out_path).write_bytes(tone_bytes(1.0)); return Path(out_path)
             def voices(self): return []
 
         class B(A):
             name = "b"
-            def synthesize(self, text, out_path, **k):
-                Path(out_path).write_bytes(b"b" * 16); return Path(out_path)
 
         spec = {"scenes": [{"type": "hook", "voice": "same line"}]}
         spec_path = tmp_path / "01_x.json"
@@ -240,8 +242,30 @@ class TestWildcardRouting:
         assert plugins.publisher_for("youtube").name != "local_folder"
         assert plugins.publisher_for("instagram").name != "local_folder"
 
-    def test_a_wildcard_still_covers_a_platform_nothing_else_reaches(self):
-        assert plugins.publisher_for("tiktok").name == "local_folder"
+    def test_a_wildcard_does_not_rescue_an_unknown_platform(self):
+        """The safety net a typo needs.
+
+        `platforms: [instgram]` must still fail loudly. Letting the wildcard catch it
+        would write a folder and record the post as published for a platform that does
+        not exist.
+        """
+        with pytest.raises(plugins.PluginError, match="instgram"):
+            plugins.publisher_for("instgram")
+        assert plugins.publisher_for("instgram", ["local_folder"]).name == "local_folder"
 
     def test_an_explicit_real_backend_still_wins(self):
         assert plugins.publisher_for("youtube", ["zernio"]).name == "zernio"
+
+
+class TestPracticeRuns:
+    """A practice run must not be able to consume a real one."""
+
+    def test_local_folder_does_not_claim_to_publish(self):
+        assert plugins.load("publish", "local_folder").records_publication is False
+
+    def test_every_real_publisher_does(self):
+        for name in plugins.names("publish"):
+            backend = plugins.load("publish", name)
+            if name == "local_folder":
+                continue
+            assert backend.records_publication is True, f"{name} does not record publication"

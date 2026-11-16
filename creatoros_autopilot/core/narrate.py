@@ -17,9 +17,14 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import media
 from . import spec as spec_mod
 
 MANIFEST = "manifest.json"
+
+#: Narration slower than this is not speech. Used to catch a backend that exits cleanly
+#: having spoken nothing — the clip is not empty, so a size check passes it.
+MIN_SECONDS_PER_CHAR = 0.012
 
 
 @dataclass
@@ -48,6 +53,35 @@ def _fingerprint(backend, text: str, voice: str, model: str) -> str:
     """
     parts = [getattr(backend, "name", type(backend).__name__), voice, model, text]
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:20]
+
+
+def _implausible(target: Path, line: str, backend) -> str:
+    """Whether a written clip is too short to be the line it claims to be.
+
+    A size check is not enough, and the gap is not theoretical. A TTS backend handed text
+    its voice cannot pronounce — Devanagari to an English-only macOS voice, an unsupported
+    script to Piper's phonemiser — exits 0 and writes a valid but near-silent file.
+    `narrate` then records the hash, the renderer falls back to the scene's minimum
+    duration, and the video ships with that line missing. Every later run reports
+    "unchanged", so it is never retried.
+
+    Measured on macOS: a Hindi clause that takes 3.05 s in a voice that speaks it takes
+    0.0116 s in one that does not.
+    """
+    if not target.exists() or target.stat().st_size == 0:
+        return f"{backend.name} wrote no audio"
+    expected = max(0.25, len(line) * MIN_SECONDS_PER_CHAR)
+    try:
+        actual = media.duration(str(target))
+    except Exception:
+        # ffprobe could not read it at all, which is its own kind of broken: a frameless
+        # file here makes every later render fail with nothing pointing at the cause.
+        return f"{backend.name} wrote a file ffprobe cannot read"
+    if actual < expected * 0.5:
+        return (f"{backend.name} produced {actual:.2f}s for {len(line)} characters "
+                f"(expected at least {expected * 0.5:.2f}s) — the voice probably cannot "
+                f"pronounce this script")
+    return ""
 
 
 def narrate(spec: dict, spec_path: str | Path, backend, *, voice: str = "",
@@ -80,8 +114,12 @@ def narrate(spec: dict, spec_path: str | Path, backend, *, voice: str = "",
         except Exception as exc:
             result.problems.append(f"scene {index}: {type(exc).__name__}: {exc}")
             continue
-        if not target.exists() or target.stat().st_size == 0:
-            result.problems.append(f"scene {index}: {backend.name} wrote no audio")
+        problem = _implausible(target, line, backend)
+        if problem:
+            # Leave no half-good clip behind: the manifest is not updated, but an
+            # existing file would be accepted by the next run's size check.
+            target.unlink(missing_ok=True)
+            result.problems.append(f"scene {index}: {problem}")
             continue
         manifest[key] = digest
         result.written.append(index)

@@ -28,6 +28,7 @@ class FakePublisher:
     name = "fake"
     platforms = ("instagram", "youtube", "local")
     third_party = False
+    records_publication = True
 
     def __init__(self, raises=(), platform_errors=()):
         self.calls = []
@@ -238,3 +239,35 @@ class TestRouting:
             plugins_mod.publisher_for = original
         assert len(routes) == 1, "the same backend must not be routed twice"
         assert sorted(next(iter(routes.values()))[1]) == ["instagram", "youtube"]
+
+
+class TestPracticeRuns:
+    """A backend that does not publish must not mark the ledger done.
+
+    `local_folder` writes the video and the metadata that would have been sent. That is a
+    useful dry run, and recording it as published would mark the job done so the real
+    publisher skips it forever — a practice run silently consuming a real one.
+    """
+
+    def test_a_practice_backend_writes_no_ok_rows(self, day):
+        class Practice(FakePublisher):
+            name = "practice"
+            records_publication = False
+
+        pipeline.publish_day(day, "2026-11-17", publisher=Practice())
+        assert not day.ledger_path.exists() or not list(Ledger(day.ledger_path).entries())
+
+    def test_the_real_publisher_still_runs_afterwards(self, day):
+        class Practice(FakePublisher):
+            name = "practice"
+            records_publication = False
+
+        pipeline.publish_day(day, "2026-11-17", publisher=Practice())
+        real = FakePublisher()
+        pipeline.publish_day(day, "2026-11-17", publisher=real)
+        assert real.calls, "the real publisher was skipped after a practice run"
+        assert all(sorted(c["platforms"]) == ["instagram", "youtube"] for c in real.calls)
+
+    def test_a_real_backend_does_record(self, day):
+        pipeline.publish_day(day, "2026-11-17", publisher=FakePublisher())
+        assert list(Ledger(day.ledger_path).entries())

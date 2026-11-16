@@ -48,6 +48,9 @@ class PublishResult:
     outcomes: list[PlatformOutcome] = field(default_factory=list)
     dry_run: bool = False
     error: str = ""
+    #: Platforms that were handled by a backend which does not actually publish. The
+    #: pipeline sets this; a backend never needs to.
+    practice: set = field(default_factory=set)
 
     def outcome_for(self, platform: str) -> PlatformOutcome | None:
         return next((o for o in self.outcomes if o.platform == platform), None)
@@ -75,6 +78,13 @@ class Publisher(Protocol):
     platforms: tuple[str, ...]
     #: Whether using this needs a paid or third-party account beyond the platform itself.
     third_party: bool
+    #: Whether a success here means the video is actually on the platform.
+    #:
+    #: `local_folder` sets this False. It handles a request honestly — it writes the video
+    #: and the metadata that would have been sent — but nothing was posted, so recording
+    #: it as published would mark the job done and the real publisher would skip it
+    #: forever. A practice run must not be able to consume a real one.
+    records_publication: bool
 
     def available(self) -> Availability:
         ...

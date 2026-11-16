@@ -35,6 +35,11 @@ publish:
   # The live channel runs `auto`. Every other preset ships `draft`.
   mode: auto
   platforms: [instagram, youtube]     # the same MP4 to both, at the same slot
+  # Pinned deliberately. Without this, routing prefers a backend that needs no
+  # third-party account and would send this channel's videos to the direct YouTube and
+  # Instagram APIs — which are not configured here — instead of Zernio. One upload to
+  # Zernio also serves both platforms, which two direct backends cannot do.
+  backends: [zernio]
   # Rendering four videos takes about six hours, so they are scheduled onto the NEXT day's
   # slots and never race the clock. The pipeline therefore always holds a day of stock,
   # and a slow run does not leave a gap.

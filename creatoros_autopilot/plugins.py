@@ -139,8 +139,9 @@ def publisher_for(platform: str, preferred: list[str] | tuple[str, ...] = ()) ->
        everything there, even though it is a wildcard backend, because that is what a dry
        practice run means. Getting this wrong is not academic: a config that said
        `backends: [local_folder]` was silently routed to the live YouTube API instead.
-    2. **An exact platform match beats a wildcard**, so with no preference set, YouTube
-       goes to the YouTube backend rather than being written to a folder.
+    2. **A wildcard backend never applies unless it was named**, so an unknown or
+       mistyped platform still fails loudly instead of being quietly written to a folder
+       and recorded as published.
     3. **A backend that needs no third-party account wins the tie**, so a new user is not
        routed through a paid intermediary by default.
     """
@@ -153,7 +154,11 @@ def publisher_for(platform: str, preferred: list[str] | tuple[str, ...] = ()) ->
             continue
         reaches = tuple(getattr(backend, "platforms", ()))
         exact = platform in reaches
-        wildcard = ANY_PLATFORM in reaches
+        # A wildcard backend only applies when the user named it. Letting it match by
+        # default removed the safety net that caught a typo: `platforms: [instgram]` used
+        # to raise "no publisher can reach 'instgram'", and would instead have quietly
+        # written a folder and recorded the post as done.
+        wildcard = ANY_PLATFORM in reaches and name in preferred
         if not (exact or wildcard):
             continue
         candidates.append((

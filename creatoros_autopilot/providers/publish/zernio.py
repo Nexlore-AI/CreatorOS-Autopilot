@@ -82,6 +82,7 @@ class Zernio:
     name = "zernio"
     platforms = ("instagram", "youtube")
     third_party = True
+    records_publication = True
 
     def __init__(self, api_key: str | None = None, base: str | None = None,
                  key_env: str = "ZERNIO_API_KEY"):

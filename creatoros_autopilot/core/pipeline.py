@@ -110,7 +110,7 @@ def _publish_via(routes: dict, video, job_id: str, pending: list[str], decision,
         except Exception:
             spec = {}
 
-    outcomes, ok, post_id = [], True, ""
+    outcomes, ok, post_id, practice = [], True, "", set()
     for backend, owned in routes.values():
         mine = [p for p in pending if p in owned]
         if not mine:
@@ -122,11 +122,17 @@ def _publish_via(routes: dict, video, job_id: str, pending: list[str], decision,
         res = backend.publish(request)
         post_id = post_id or res.post_id
         ok = ok and res.ok
+        if not getattr(backend, "records_publication", True):
+            practice.update(mine)
         for platform in mine:
             found = res.outcome_for(platform)
             outcomes.append(found or PlatformOutcome(platform, res.ok))
-    return PublishResult(ok=ok, mode=decision.mode, post_id=post_id,
-                         outcomes=outcomes, dry_run=dry_run)
+    result = PublishResult(ok=ok, mode=decision.mode, post_id=post_id,
+                           outcomes=outcomes, dry_run=dry_run)
+    # Platforms handled by a practice backend: nothing was posted, so nothing may be
+    # recorded as done.
+    result.practice = practice
+    return result
 
 
 def _iso(moment):
@@ -237,11 +243,18 @@ def publish_day(settings: Settings, date: str, *, dry_run: bool = False,
             # fails inside it (HTTP 207). Recording a blanket result would then either
             # lose a real failure or re-post a platform that already succeeded, so each
             # platform's row is written from its own status.
+            practice = getattr(res, "practice", set())
             ok_by_platform = {p: res.ok_for(p) for p in pending}
             item.ok = bool(res.ok) and all(ok_by_platform.values())
             item.platforms = [p for p, ok in ok_by_platform.items() if ok]
             if not dry_run:
                 for platform in pending:
+                    if platform in practice:
+                        # Handled by a backend that does not publish. Writing an ok row
+                        # here would mark the job done and the real publisher would skip
+                        # it forever — a practice run consuming a real one.
+                        print(f"  . {platform}: written, not published — not recorded")
+                        continue
                     found = res.outcome_for(platform)
                     ledger.record(Entry(
                         job_id=job_id, platform=platform, ok=ok_by_platform[platform],
