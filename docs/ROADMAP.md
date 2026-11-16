@@ -1,6 +1,7 @@
 # CreatorOS Autopilot — Roadmap
 
-**Status:** Phase 0 (audit and plan). No code has changed. Phases 1–7 are proposed, not started.
+**Status:** Phase 0 complete. No code has changed. The four decisions in §6 were answered on
+2026-11-17 and are recorded there. Phases 1–7 are proposed, not started.
 
 This document is the plan for turning CreatorOS Autopilot from a pipeline that runs one
 channel on one Mac into an open-source platform that anyone can run on their own machine
@@ -8,7 +9,7 @@ with their own keys — without the Nexlore AI channel missing a day.
 
 It has three jobs: record what the code actually does today (§1), propose the shape it
 should take (§2–§4), and define the work and how we know each phase is done (§5). The
-decisions that are not mine to make are in §6.
+decisions that were not mine to make are in §6, with the answers.
 
 ---
 
@@ -197,7 +198,7 @@ not safely available to us: a user with both installed gets one clobbering the o
 Checked and available: `creatoros-autopilot`, `creator-os`, `creatoros-cli`, `creatorkit`,
 `postpilot`, `reelpilot`, `creatorctl`.
 
-**Recommendation** — keep the product name, split the three identifiers:
+**Decided** (2026-11-17) — keep the product name, split the three identifiers:
 
 | | |
 |---|---|
@@ -209,7 +210,7 @@ Checked and available: `creatoros-autopilot`, `creator-os`, `creatoros-cli`, `cr
 The taken package declares no console script, so the `creatoros` command — the name users
 actually type and the one in the brief's user story — is free. The cost is a clunky import
 line for contributors, which matters far less for an application than for a library.
-Decision 2 in §6.
+Decision 2 in §6. Everything created from Phase 1 onward uses these three names.
 
 ---
 
@@ -247,15 +248,19 @@ One PR per phase. Each leaves the repo working and its tests passing.
 - [x] Map the code; list every macOS-only, hard-coded, brand-specific and secret-adjacent spot (§1.3).
 - [x] Propose the architecture, package and CLI name, and the migration path (§2–§4).
 - [x] Check PyPI availability (§3).
-- [ ] Decisions in §6.
+- [x] Decisions in §6 — all four answered 2026-11-17.
 
-**Done when:** §6 is answered. Nothing in Phase 1 should start before decision 1 and 2,
-because the licence header and the package name touch every file created afterwards.
+**Done when:** §6 is answered — it is. Phase 1 is unblocked, and its first two commits are
+the AGPL-3.0 `LICENSE` and the `pyproject.toml` that fixes the names, because both touch
+every file created afterwards.
 
 ### Phase 1 — Package and run anywhere
-- Add `LICENSE` (decision 1) and `pyproject.toml`; Python floor 3.10+; keep runtime
+- Add `LICENSE` (AGPL-3.0) and a CLA, then `pyproject.toml` naming the distribution
+  `creatoros-autopilot`, the package `creatoros_autopilot` and the `creatoros` console
+  script. Python floor 3.10+; keep runtime
   dependencies to Pillow, NumPy, pydantic, PyYAML and one HTTP client.
 - Move the modules into `creatoros_autopilot/`; kill the sibling imports (E-25).
+- Add the AGPL notice to every source file and `SPDX-License-Identifier` headers.
 - Replace the Bash wrappers with the `creatoros` CLI (A-7, E-27). Port the lock, the
   due-time gate and the slot arithmetic to Python.
 - **Fix A-4**: all date and timezone arithmetic in Python with `zoneinfo`; declare `tzdata`
@@ -279,7 +284,10 @@ because the licence header and the package name touch every file created afterwa
 - Add Ollama (local LLM) and Piper (local TTS) — this is the zero-cost path (A-5), and it
   is the feature that decides whether anyone tries this.
 - Add `local_folder` publisher (render, write metadata, publish nothing).
-- Add direct YouTube Data API and Instagram Graph API publishers beside Zernio.
+- Add direct YouTube Data API and Instagram Graph API publishers beside Zernio. These are
+  the **documented default for new users**; Zernio stays fully supported and stays the
+  Nexlore preset's publisher; `local_folder` is the actual first-run default, so trying the
+  project needs no paid account and no OAuth app (decision 4).
 - Keep `containsSyntheticMedia` as a default the interface sets, not something a provider
   may forget.
 
@@ -297,7 +305,9 @@ run completes with `llm=ollama`, `tts=piper`, `publish=local_folder` and no netw
   with the loanword lexicon as brand data. The gate is opt-in.
 - YouTube category and visibility become per-channel config (C-18).
 - Content pillars and daily/weekly/monthly schedules; cross-platform scheduling.
-- Move the Nexlore strategy into `examples/nexlore-ai/` (C-19).
+- Move the Nexlore strategy into `examples/nexlore-ai/` (C-19), and author two more presets
+  beside it (decision 3): one English non-tech, one Spanish. Three presets is what proves
+  the brand and language settings work rather than asserting it.
 
 **Acceptance:** a new user goes from `pip install` to a rendered video in under 10 minutes
 on the free local path, with no card and no accounts — timed on a clean machine, written up
@@ -340,10 +350,12 @@ code. No implementation.
 
 ---
 
-## 6. Decisions I need from you
+## 6. Decisions — answered 2026-11-17
 
-**1. Licence — blocking, and urgent on its own.** The repo is public with no licence right
-now (F-32), which legally means nobody may use or contribute to it.
+### ✅ 1. Licence → **AGPL-3.0, with a CLA**
+
+The repo is public with no licence right now (F-32), which legally means nobody may use or
+contribute to it. The options were:
 
 - **MIT / Apache-2.0** — maximum adoption. Anyone may host a modified version commercially
   without sharing changes, including a competitor to the future hosted product. Apache-2.0
@@ -354,32 +366,43 @@ now (F-32), which legally means nobody may use or contribute to it.
   many companies ban AGPL dependencies outright, so some contributors and most corporate
   users will stay away.
 
-**My recommendation: AGPL-3.0, with a CLA.** You have told me there is a hosted product
-coming and that the open-source core must not be rewritable into a competitor. AGPL is the
-licence that matches that, and for a creator tool the corporate-ban cost is small — your
-users are individuals, not procurement departments. The CLA keeps your own right to
-relicense the hosted version. If you would rather optimise purely for stars and adoption and
-accept that someone may host it, pick Apache-2.0 — but that is a one-way door, so it is
-your call, not mine.
+**Chosen: AGPL-3.0 with a CLA.** The hosted product is planned, and AGPL is the licence
+that stops someone hosting a modified core against it. For a creator tool the corporate-ban
+cost is small — the users are individuals, not procurement departments. The CLA preserves the
+right to relicense the hosted version.
 
-**2. Package and CLI name.** `creatoros` is taken on PyPI by an unrelated library whose wheel
-occupies the `creatoros` import name (§3). Recommendation: PyPI `creatoros-autopilot`, import
-`creatoros_autopilot`, CLI `creatoros`. Alternative if you want a clean single name across all
-three: `creatorkit`, `postpilot` and `reelpilot` are all free.
+Consequences to carry into Phase 1: `LICENSE` is the first commit; every source file gets an
+`SPDX-License-Identifier: AGPL-3.0-or-later` header; `CONTRIBUTING.md` (Phase 4) explains the
+CLA and wires up a signature check; and the README must state the licence plainly, because
+AGPL is the first thing a cautious adopter looks for.
 
-**3. Default content focus for the examples.** Tech/AI explainers only, or a broader set?
-Recommendation: ship three presets — `nexlore-ai` (Hinglish AI explainers, yours), one
-English non-tech (fitness or finance), one non-English non-Indian (Spanish). Three is what
-proves the brand and language settings actually work; one preset means the abstractions are
-untested and the project reads as "an AI-shorts tool" rather than a platform.
+### ✅ 2. Package and CLI name → **`creatoros-autopilot` / `creatoros_autopilot` / `creatoros`**
 
-**4. Publishing — is Zernio first-class, or are direct APIs the default?** Recommendation:
-direct YouTube Data API and Instagram Graph API are the *documented default* for new users,
-Zernio stays fully supported and stays your own default. Reasons: a new user should not need
-a paid third-party account to try the thing, direct APIs are what a hosted product will use
-anyway, and a Zernio outage should not be able to take the project down. The cost is that
-direct APIs need OAuth, which is much harsher onboarding — so `local_folder` becomes the real
-first-run default and publishing is opt-in either way.
+`creatoros` is taken on PyPI by an unrelated library whose wheel occupies the `creatoros`
+import name (§3), so the three identifiers are split.
+
+**Chosen:** PyPI distribution `creatoros-autopilot`, import package `creatoros_autopilot`,
+CLI command `creatoros`. The command users actually type is free — the taken package ships no
+console script — and the product and repo names are unchanged. The clean single-name
+alternatives (`creatorkit`, `postpilot`, `reelpilot`, all available) were not taken.
+
+### ✅ 3. Example presets → **three**
+
+**Chosen:** three presets — `nexlore-ai` (Hinglish AI explainers, yours), one English
+non-tech (fitness or finance), and one Spanish. Three is what proves the brand and language
+settings actually work; one preset leaves those abstractions untested and the project reads
+as "an AI-shorts tool" rather than a platform. Authored in Phase 3.
+
+### ✅ 4. Publishing → **direct APIs documented as the default, Zernio fully supported**
+
+**Chosen:** the direct YouTube Data API and Instagram Graph API publishers are the
+*documented default* for new users; Zernio stays fully supported and stays the Nexlore
+preset's publisher. Reasons: a new user should not need a paid third-party account to try the
+project, direct APIs are what the hosted version will use anyway, and a Zernio outage should
+not be able to take the project down.
+
+The cost is that direct APIs need OAuth, which is much harsher onboarding — so `local_folder`
+becomes the real first-run default and publishing is opt-in either way. Built in Phase 2.
 
 ---
 
