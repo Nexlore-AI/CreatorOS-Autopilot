@@ -1,0 +1,39 @@
+{
+  "display": "YouTube",
+  "zernio_platform": "youtube",
+  "enabled": true,
+  "formats": {
+    "short": {
+      "aspect": "9:16",
+      "max_seconds": 180,
+      "detection": "automatic from aspect ratio",
+      "verified": true
+    }
+  },
+  "text": {
+    "title_max": 100,
+    "title_target": [
+      50,
+      70
+    ],
+    "description_max": 5000,
+    "fold_chars": 157,
+    "tags_total_chars": 500,
+    "tag_max_chars": 100,
+    "title_field": true,
+    "verified": true
+  },
+  "platform_specific": {
+    "categoryId": "28",
+    "madeForKids": false,
+    "containsSyntheticMedia": true,
+    "note": "28 = Science & Technology. containsSyntheticMedia is required: the narration is an AI voice."
+  },
+  "cover": {
+    "source": "cover_jpg",
+    "field": "mediaItems[].thumbnail",
+    "max_bytes": 2097152
+  },
+  "language": "english_first_then_hinglish",
+  "zernio_key": "ZERNIO_API_KEY"
+}

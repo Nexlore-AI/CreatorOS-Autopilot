@@ -1,0 +1,16 @@
+{
+  "display": "The Enterprise Brief",
+  "slot": "03",
+  "order": "random",
+  "schedule_ist": "12:30",
+  "days": "daily",
+  "spine": "the-room-where-it-was-decided",
+  "brief": "A real company deploying AI, a funding or listing event, or a hard number on adoption or cost. Primary sources only: SEC filings, company blogs, earnings.",
+  "platforms": [
+    "instagram",
+    "youtube"
+  ],
+  "voice_lang": "hinglish",
+  "also_story": true,
+  "resource": "sources"
+}

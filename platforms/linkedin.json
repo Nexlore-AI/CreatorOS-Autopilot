@@ -1,0 +1,24 @@
+{
+  "display": "LinkedIn",
+  "zernio_platform": "linkedin",
+  "enabled": false,
+  "formats": {
+    "video": {
+      "aspect": "9:16 or 1:1",
+      "verified": false
+    }
+  },
+  "text": {
+    "post_max": 3000,
+    "fold_chars": 210,
+    "hashtags": [
+      3,
+      5
+    ],
+    "title_field": false,
+    "verified": false
+  },
+  "language": "english_professional",
+  "zernio_key": "ZERNIO_API_KEY_2",
+  "todo": "confirm limits and Zernio support before enabling"
+}

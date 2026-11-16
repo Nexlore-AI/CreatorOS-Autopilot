@@ -1,0 +1,31 @@
+# ---- Secrets: never commit ----
+.env
+.env.*
+!.env.example
+*.env.bak*
+
+# ---- Local runtime state and output ----
+.venv/
+out/
+logs/
+history.jsonl
+publish_ledger.jsonl*
+shorts/history.jsonl
+shorts/ledger.jsonl
+shorts/music_used.json
+shorts/music/*.mp3
+voice_auditions/
+engine/tts/bakeoff_out/
+_to_delete/
+*.mp3
+*.wav
+*.aiff
+*.mp4
+
+# ---- Editor / OS / Python ----
+.DS_Store
+__pycache__/
+*.pyc
+*.bak
+*.bak.*
+.claude/settings.local.json

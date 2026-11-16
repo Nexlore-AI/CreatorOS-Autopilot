@@ -1,0 +1,24 @@
+{
+  "display": "X / Twitter",
+  "zernio_platform": "twitter",
+  "enabled": false,
+  "formats": {
+    "video": {
+      "aspect": "9:16",
+      "verified": false
+    }
+  },
+  "text": {
+    "post_max": 280,
+    "post_max_premium": 25000,
+    "hashtags": [
+      1,
+      2
+    ],
+    "title_field": false,
+    "verified": false
+  },
+  "language": "english_terse",
+  "zernio_key": "ZERNIO_API_KEY_2",
+  "todo": "confirm limits, tier and Zernio support before enabling"
+}

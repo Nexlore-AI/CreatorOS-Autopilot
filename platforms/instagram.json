@@ -1,0 +1,43 @@
+{
+  "display": "Instagram",
+  "zernio_platform": "instagram",
+  "enabled": true,
+  "formats": {
+    "reel": {
+      "aspect": "9:16",
+      "max_bytes": 314572800,
+      "max_seconds": 900,
+      "verified": true
+    },
+    "story": {
+      "aspect": "9:16",
+      "max_bytes": 104857600,
+      "max_seconds": 60,
+      "verified": true
+    },
+    "carousel": {
+      "max_items": 20,
+      "verified": true
+    }
+  },
+  "text": {
+    "caption_max": 2200,
+    "fold_chars": 125,
+    "hashtags": [
+      3,
+      5
+    ],
+    "title_field": false,
+    "verified": true
+  },
+  "cover": {
+    "source": "first_video_frame",
+    "note": "Zernio exposes no thumbnail field for Instagram; the cover comes from frame 0, which is why frame 0 must be a finished frame."
+  },
+  "language": "roman_hinglish",
+  "rate_limit": {
+    "posts_per_24h": 100,
+    "verified": true
+  },
+  "zernio_key": "ZERNIO_API_KEY"
+}

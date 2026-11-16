@@ -1,0 +1,24 @@
+{
+  "display": "Medium",
+  "zernio_platform": null,
+  "enabled": false,
+  "formats": {
+    "article": {
+      "body": "markdown",
+      "verified": false
+    }
+  },
+  "text": {
+    "title_max": 100,
+    "subtitle_max": 140,
+    "body": "long-form, 800-1500 words",
+    "tags": [
+      5,
+      5
+    ],
+    "verified": false
+  },
+  "language": "english_longform",
+  "zernio_key": null,
+  "todo": "Zernio may not support Medium at all. If not, this is a separate adapter against Medium's own API, or a manual export."
+}

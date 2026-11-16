@@ -1,0 +1,27 @@
+{
+  "display": "Facebook",
+  "zernio_platform": "facebook",
+  "enabled": false,
+  "formats": {
+    "reel": {
+      "aspect": "9:16",
+      "verified": false
+    }
+  },
+  "text": {
+    "caption_max": 2200,
+    "hashtags": [
+      2,
+      4
+    ],
+    "title_field": false,
+    "verified": false
+  },
+  "cover": {
+    "source": "cover_jpg",
+    "field": "mediaItems[].thumbnail"
+  },
+  "language": "roman_hinglish",
+  "zernio_key": "ZERNIO_API_KEY_3",
+  "todo": "confirm Zernio support before enabling"
+}

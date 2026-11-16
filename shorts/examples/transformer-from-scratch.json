@@ -1,0 +1,215 @@
+{
+ "id": "example_transformer-from-scratch",
+ "tag": "AI EXPLAINED · TRANSFORMERS",
+ "music": "a_lofi_tech.mp3",
+ "scenes": [
+  {
+   "type": "hook",
+   "lines": [
+    "Stop copying",
+    "transformer",
+    "code"
+   ],
+   "underline": 2,
+   "kicker": "before you know these",
+   "big": "4",
+   "big_suffix": "pieces.",
+   "voice": "ट्रांसफॉर्मर का कोड कॉपी करना बंद करो, जब तक ये चार पीसेज़ समझ नहीं आते।"
+  },
+  {
+   "type": "stack",
+   "title": "Let's build one",
+   "title2": "from scratch.",
+   "items": [
+    {
+     "name": "Feed-forward",
+     "sub": "each token thinks"
+    },
+    {
+     "name": "Self-attention",
+     "sub": "tokens talk to each other"
+    },
+    {
+     "name": "Positions",
+     "sub": "where each token sits"
+    },
+    {
+     "name": "Embeddings",
+     "sub": "tokens → vectors"
+    }
+   ],
+   "voice": "चलो, एक ट्रांसफॉर्मर बिल्कुल स्क्रैच से बनाते हैं।"
+  },
+  {
+   "type": "section",
+   "label": "Piece 1 / 4",
+   "title": "Embeddings",
+   "body": "Every token becomes a vector of numbers the model learns in training.",
+   "visual": {
+    "type": "vectors",
+    "tokens": [
+     "the",
+     "cat",
+     "sat"
+    ]
+   },
+   "code": "x = embed(tokens)   # (T, d)",
+   "voice": "पहला पीस, एम्बेडिंग्स। हर टोकन नंबर्स का एक वेक्टर बन जाता है, जिसे मॉडल ट्रेनिंग में सीखता है।"
+  },
+  {
+   "type": "section",
+   "label": "Piece 2 / 4",
+   "title": "Positions",
+   "body": "Attention sees every token at once, so we add where each one sits.",
+   "visual": {
+    "type": "vectors",
+    "tokens": [
+     "the",
+     "cat",
+     "sat"
+    ],
+    "add_waves": true,
+    "rows": 6
+   },
+   "code": "x = x + pos_enc(T, d)",
+   "voice": "दूसरा पीस, पोज़िशनल एनकोडिंग। अटेंशन सारे टोकन्स एक साथ देखता है, इसलिए हर टोकन में उसकी पोज़िशन जोड़ते हैं।"
+  },
+  {
+   "type": "section",
+   "label": "Piece 3 / 4",
+   "title": "Self-attention",
+   "body": "Each token sends a Query, the others match it with their Keys, and their Values get mixed.",
+   "visual": {
+    "type": "attention",
+    "tokens": [
+     "the",
+     "cat",
+     "sat"
+    ],
+    "focus": 2,
+    "weights": [
+     0.22,
+     0.62,
+     0.16
+    ],
+    "caption": "\"sat\" pays most attention to \"cat\"",
+    "matrix": [
+     [
+      0.7,
+      0.2,
+      0.1
+     ],
+     [
+      0.3,
+      0.55,
+      0.15
+     ],
+     [
+      0.22,
+      0.62,
+      0.16
+     ]
+    ]
+   },
+   "code": "att = softmax(q @ k.T / d**0.5) @ v",
+   "voice": "तीसरा पीस, सेल्फ़-अटेंशन। हर टोकन एक क्वेरी भेजता है, बाकी टोकन्स अपनी कीज़ से मैच होते हैं, और उनकी वैल्यूज़ मिक्स हो जाती हैं। फ़ॉर्मूला है, सॉफ्टमैक्स ऑफ़ क्यू के-ट्रांसपोज़, ओवर रूट डी, टाइम्स वी।",
+   "formula": "softmax(QKᵀ / √d) · V"
+  },
+  {
+   "type": "section",
+   "label": "Piece 4 / 4",
+   "title": "Feed-forward",
+   "subtitle": "+ residual + LayerNorm",
+   "body": "Each token thinks on its own, and the original signal is added back.",
+   "visual": {
+    "type": "flow",
+    "blocks": [
+     {
+      "name": "Attention",
+      "color": "indigo"
+     },
+     {
+      "name": "Add & Norm",
+      "color": "blue"
+     },
+     {
+      "name": "Feed-forward",
+      "color": "violet"
+     },
+     {
+      "name": "Add & Norm",
+      "color": "blue"
+     }
+    ],
+    "skips": [
+     [
+      0,
+      1
+     ],
+     [
+      2,
+      3
+     ]
+    ],
+    "repeat": "× N"
+   },
+   "code": "x = norm(x + att(x))\nx = norm(x + ffn(x))",
+   "voice": "चौथा पीस, फ़ीड-फ़ॉरवर्ड, रेज़िड्युअल और लेयर-नॉर्म। हर टोकन अलग से सोचता है, और ओरिजिनल सिग्नल वापस जुड़ जाता है।"
+  },
+  {
+   "type": "predict",
+   "title": "Stack it N times.",
+   "title2": "Predict the next token.",
+   "prompt": "the cat sat on the",
+   "answer": "mat",
+   "options": [
+    [
+     "mat",
+     0.86
+    ],
+    [
+     "floor",
+     0.46
+    ],
+    [
+     "sofa",
+     0.31
+    ],
+    [
+     "moon",
+     0.07
+    ]
+   ],
+   "outro": "That's the core of GPT.",
+   "voice": "इस ब्लॉक को एन बार स्टैक करो, और अगला टोकन प्रेडिक्ट करो। यही है जीपीटी का कोर।"
+  },
+  {
+   "type": "cta",
+   "line1": "4 pieces.",
+   "line2": "One transformer.",
+   "sub": "Line-by-line code is next.",
+   "voice": "पूरा लाइन-बाय-लाइन कोड चाहिए? नेक्सलोर एआई को फ़ॉलो करो।"
+  }
+ ],
+ "platforms": {
+  "youtube": {
+   "title": "Transformer From Scratch in 4 Pieces (Hindi)",
+   "description": "Transformer को scratch से समझो: 4 pieces, एक model. Every transformer, GPT included, comes down to embeddings, positional encoding, self-attention, and a feed-forward block with residuals + LayerNorm.\n\n#shorts #transformers #machinelearning #llm #hindi",
+   "tags": [
+    "transformer from scratch",
+    "transformer in hindi",
+    "self attention",
+    "attention is all you need",
+    "positional encoding",
+    "gpt explained",
+    "llm hindi",
+    "deep learning",
+    "pytorch",
+    "machine learning"
+   ]
+  }
+ },
+ "sources": [
+  "https://arxiv.org/abs/1706.03762"
+ ]
+}

@@ -1,0 +1,62 @@
+{
+  "concept-series": {
+    "cursor": {
+      "arc": 0,
+      "day": 0
+    },
+    "arcs": [
+      {
+        "title": "How an LLM actually answers you",
+        "days": [
+          "Tokens: why the model never sees your words",
+          "Embeddings: meaning as a position in space",
+          "Attention: how it decides what matters",
+          "The feed-forward layer: where the knowledge sits",
+          "Sampling: why the same prompt gives different answers",
+          "Context window: what it forgets, and when"
+        ]
+      },
+      {
+        "title": "RAG, end to end",
+        "days": [
+          "Why a model cannot just read your documents",
+          "Chunking: the decision that quietly ruins retrieval",
+          "Embedding and the vector store",
+          "Retrieval vs reranking: two different jobs",
+          "Stuffing the context without poisoning it",
+          "Measuring whether retrieval is actually working"
+        ]
+      },
+      {
+        "title": "Agents, properly",
+        "days": [
+          "A chatbot with tools is not an agent",
+          "The control loop: plan, act, observe, revise",
+          "Tool choice and why it fails",
+          "Memory: what an agent should and should not remember",
+          "Guardrails, permissions and human approval",
+          "Evaluating an agent when the output is a trajectory"
+        ]
+      }
+    ]
+  },
+  "interview": {
+    "cursor": {
+      "arc": 0,
+      "day": 0
+    },
+    "arcs": [
+      {
+        "title": "System design, week one",
+        "days": [
+          "Design a production RAG system",
+          "How would you stop it hallucinating?",
+          "When is fine-tuning the wrong answer?",
+          "Design an agent that processes 1,000 invoices",
+          "How do you evaluate an LLM feature?",
+          "Your latency budget is 400ms. What do you cut?"
+        ]
+      }
+    ]
+  }
+}

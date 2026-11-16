@@ -1,0 +1,12 @@
+#!/bin/bash
+# Wrapper for the Zernio helper: loads config.env + .env (secrets override), then uses the project's .venv.
+#   ./zernio accounts                          what is connected (read-only)
+#   ./zernio post out/DATE/02_paper_x.mp4      create a draft (nothing goes out)
+#   ./zernio post FILE.mp4 --mode schedule     schedule at the POST_TIMES slot for its 0N_ prefix
+#   ./zernio post FILE.mp4 --mode publish      post immediately
+D="$(cd "$(dirname "$0")" && pwd)"
+cd "$D"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+set -a; source ./config.env; [[ -f .env ]] && source ./.env; [[ -f .env.local ]] && source ./.env.local; set +a   # secrets (.env*) override config
+PY="$D/.venv/bin/python"; [[ -x "$PY" ]] || PY=python3
+exec "$PY" "$D/engine/zernio.py" "$@"
