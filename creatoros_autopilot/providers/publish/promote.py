@@ -22,8 +22,21 @@ import sys
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import publish_zernio as pz  # noqa: E402
+from . import zernio as pz                       # spec + metadata helpers
+from ._api import LIMITS, ZernioAPI, ZernioError
+
+_api = ZernioAPI()
+
+
+def _req(method, url, key=None, body=None, raw=None, ctype=None, idem=None):
+    """The old `publish_zernio.req` signature, backed by the one shared client.
+
+    These three tools each used to carry their own copy of the HTTP layer. They now call
+    `_api`, which is where auth, backoff and the "a dropped socket is retryable" rule live.
+    `key` is ignored: the client reads ZERNIO_API_KEY itself.
+    """
+    return _api.call(method, url, body=body, raw=raw, ctype=ctype, idem=idem,
+                     authenticated=raw is None, label=url)
 
 LEDGER = os.path.join(HERE, "publish_ledger.jsonl")
 
@@ -43,7 +56,7 @@ def ledger_rows():
 
 
 def get_post(key, pid):
-    st, d = pz.req("GET", f"{pz.API}/posts/{pid}", key=key)
+    st, d = _req("GET", f"{_api.base}/posts/{pid}", key=key)
     if st != 200:
         return None
     return (d or {}).get("post", d)
@@ -123,7 +136,7 @@ def main():
     print()
     failed = 0
     for pid in live:
-        st, res = pz.req("PUT", f"{pz.API}/posts/{pid}", key=key, body=body)
+        st, res = _req("PUT", f"{_api.base}/posts/{pid}", key=key, body=body)
         pd = (res or {}).get("post", res) if isinstance(res, dict) else {}
         status = pd.get("status") if isinstance(pd, dict) else None
         if st not in (200, 201, 207):
