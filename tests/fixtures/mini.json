@@ -1,0 +1,12 @@
+{
+  "id": "test_mini",
+  "tag": "TEST · MINI",
+  "scenes": [
+    {"type": "hook", "voice": "", "lines": ["Two scenes", "is enough"], "accent": 0},
+    {"type": "cta", "voice": "", "line1": "That is it.", "line2": "Short and done.", "min_seconds": 1.0}
+  ],
+  "platforms": {
+    "youtube": {"title": "A two-scene smoke test", "description": "Renders in seconds.", "tags": ["test"]},
+    "instagram": {"caption": "A two-scene smoke test."}
+  }
+}
