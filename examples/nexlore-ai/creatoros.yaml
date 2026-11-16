@@ -1,0 +1,45 @@
+# The Nexlore AI preset — the configuration that runs
+# https://www.youtube.com/@NexloreAI/shorts and https://instagram.com/nexloreai
+#
+# This is an example of a real channel's settings, not the defaults. Note how much of what
+# used to be hard-coded is now just data: the slot times, the offset, the voice, the
+# category. The brand itself — the wordmark, palette, fonts and the Hinglish language mix
+# — is still inside the renderer and the prompts; pulling it out into a brand kit is
+# Phase 3.
+#
+# Copy it, change what differs for you, and keep your keys in .env.
+
+workspace: ""              # set this to where your renders should live
+
+timezone: Asia/Kolkata
+
+style: nexlore-v3
+
+content:
+  videos_per_day: 4
+  run_at: "06:30"
+
+agent:
+  provider: claude_code
+  max_turns: 240           # 4 videos a run
+
+tts:
+  backend: elevenlabs
+  voice_id: ZI6I4a3UGgs1DXxqWjBV      # Riya Rao (Hindi)
+  model: eleven_multilingual_v2
+
+music:
+  mode: library
+
+publish:
+  # The live channel runs `auto`. Every other preset ships `draft`.
+  mode: auto
+  platforms: [instagram, youtube]     # the same MP4 to both, at the same slot
+  # Rendering four videos takes about six hours, so they are scheduled onto the NEXT day's
+  # slots and never race the clock. The pipeline therefore always holds a day of stock,
+  # and a slow run does not leave a gap.
+  offset_days: 1
+  post_times: ["09:00", "13:00", "18:00", "21:00"]
+  youtube:
+    visibility: public
+    category_id: "28"

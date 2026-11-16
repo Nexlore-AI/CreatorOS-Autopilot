@@ -5,8 +5,12 @@
 *.env.bak*
 
 # ---- Local config and workspace ----
-# creatoros.yaml is yours, not the project's; creatoros.example.yaml is the template.
-creatoros.yaml
+# Your own creatoros.yaml is yours, not the project's; creatoros.example.yaml is the
+# template. Anchored to the repo root with a leading slash: an unanchored `creatoros.yaml`
+# matches at every level and silently swallowed examples/nexlore-ai/creatoros.yaml, which
+# CI caught only because a test read it.
+/creatoros.yaml
+!examples/**/creatoros.yaml
 workspace/
 out/
 logs/

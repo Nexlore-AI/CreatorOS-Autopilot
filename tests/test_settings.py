@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Config is data, secrets are not config, and a typo is an error."""
 import os
+from pathlib import Path
 
 import pytest
 
 from creatoros_autopilot.core import settings as S
+
+REPO = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
@@ -119,10 +122,20 @@ class TestPaths:
                      settings.ledger_path, settings.lock_path, settings.job_dir("2026-01-01")):
             assert str(path).startswith(str(cfg / "ws"))
 
-    def test_the_shipped_example_configs_parse(self):
-        for name in ("creatoros.example.yaml", "examples/nexlore-ai/creatoros.yaml"):
-            assert S.load(name, use_env=False) is not None
+    @pytest.mark.parametrize("name", ["creatoros.example.yaml",
+                                      "examples/nexlore-ai/creatoros.yaml"])
+    def test_the_shipped_example_configs_are_committed_and_parse(self, name):
+        """Resolved from this file, not the working directory.
+
+        The relative-path version of this test passed locally and failed on all six CI
+        jobs: an unanchored `creatoros.yaml` line in .gitignore had quietly excluded the
+        Nexlore preset from the repo. A test that depends on where it is run from cannot
+        tell "the file is missing" from "you are standing somewhere else".
+        """
+        path = REPO / name
+        assert path.is_file(), f"{name} is missing from the repo — check .gitignore"
+        assert S.load(path, use_env=False) is not None
 
     def test_the_example_config_publishes_nothing(self):
         """Every shipped preset but the Nexlore one defaults to not posting."""
-        assert S.load("creatoros.example.yaml", use_env=False).publish.mode == "draft"
+        assert S.load(REPO / "creatoros.example.yaml", use_env=False).publish.mode == "draft"
