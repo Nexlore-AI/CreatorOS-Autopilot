@@ -12,7 +12,7 @@ same**, because the two platforms find videos in completely different ways.
 Writing one caption and posting it to both wastes the title field on YouTube and wastes
 the search intent on Instagram.
 
-## Hard limits (enforced by `publish_zernio.py`)
+## Hard limits (enforced by `creatoros_autopilot/providers/publish/zernio.py`)
 
 | Field | Instagram | YouTube |
 |---|---|---|
@@ -80,7 +80,7 @@ The script agent writes both packages into the spec. Do not make the publisher g
 }
 ```
 
-`publish_zernio.py` uses `platforms.instagram.caption` and `platforms.youtube.*` when
+`creatoros_autopilot/providers/publish/zernio.py` uses `platforms.instagram.caption` and `platforms.youtube.*` when
 present. When absent it falls back to the legacy single `caption` plus a title derived
 from the hook — which works, but produces the weak-title case above, so write both.
 

@@ -1,6 +1,7 @@
 # CreatorOS Autopilot — Roadmap
 
-**Status:** Phase 0 complete. No code has changed. The four decisions in §6 were answered on
+**Status:** Phase 1 complete (PR #2). Phase 0's audit stands as written below; findings
+it fixed are marked ✅. The four decisions in §6 were answered on
 2026-11-17 and are recorded there. Phases 1–7 are proposed, not started.
 
 This document is the plan for turning CreatorOS Autopilot from a pipeline that runs one
@@ -254,33 +255,67 @@ One PR per phase. Each leaves the repo working and its tests passing.
 the AGPL-3.0 `LICENSE` and the `pyproject.toml` that fixes the names, because both touch
 every file created afterwards.
 
-### Phase 1 — Package and run anywhere
-- Add `LICENSE` (AGPL-3.0) and a CLA, then `pyproject.toml` naming the distribution
-  `creatoros-autopilot`, the package `creatoros_autopilot` and the `creatoros` console
-  script. Python floor 3.10+; keep runtime
-  dependencies to Pillow, NumPy, pydantic, PyYAML and one HTTP client.
-- Move the modules into `creatoros_autopilot/`; kill the sibling imports (E-25).
-- Add the AGPL notice to every source file and `SPDX-License-Identifier` headers.
-- Replace the Bash wrappers with the `creatoros` CLI (A-7, E-27). Port the lock, the
-  due-time gate and the slot arithmetic to Python.
-- **Fix A-4**: all date and timezone arithmetic in Python with `zoneinfo`; declare `tzdata`
-  on Windows (A-6). A test asserts that a future slot schedules and never publishes now.
-- De-path config (B-8, B-9, B-10): `creatoros.yaml` with a `workspace` root; no `$HOME`
-  literal anywhere in code, prompts or defaults.
-- Detect `ffmpeg`/`ffprobe` on `PATH` with a clear error; drop `/opt/homebrew` (A-3).
-- `creatoros doctor`: checks binaries, Python version, config, keys and connected accounts,
-  and names exactly what is missing and how to fix it.
-- Dockerfile and `docker compose`.
+### Phase 1 — Package and run anywhere ✅
 
-**Acceptance:** a fresh clone on Linux, Windows and macOS runs
-`creatoros render examples/specs/kv-cache.json` to an MP4 with **no API keys set**, and
-`creatoros doctor` passes on all three. CI proves it on the OS matrix.
+*Landed. Fixes A-1 … A-7, B-8 … B-13 (partly), E-25, E-26 (partly), E-27, E-29, F-32.*
+
+- [x] Add `LICENSE` (AGPL-3.0) and a CLA, then `pyproject.toml` naming the distribution
+  `creatoros-autopilot`, the package `creatoros_autopilot` and the `creatoros` console
+  script. Python floor 3.10+. **Three runtime dependencies, not the five planned**: Pillow,
+  NumPy and PyYAML, plus `tzdata` on Windows. pydantic and an HTTP client were deferred —
+  the spec schema moves to pydantic in Phase 2 where it buys something, and `urllib`
+  already does the job. A dependency every user installs should earn its place.
+- [x] Move the modules into `creatoros_autopilot/`; kill the sibling imports (E-25).
+- [x] Add `SPDX-License-Identifier` headers to every source file (and to no third-party one).
+- [x] Replace the Bash wrappers with the `creatoros` CLI (A-7, E-27). Port the lock, the
+  due-time gate and the slot arithmetic to Python. Seven scripts, 450 lines of shell, gone.
+- [x] **Fix A-4**: all date and timezone arithmetic in Python with `zoneinfo`; `tzdata`
+  declared on Windows (A-6). `TestNeverPublishesEarly` asserts the property across every
+  offset and slot time, not one example. Verified on Linux, where `date -j` does fail.
+- [x] De-path config (B-8, B-9, B-10): `creatoros.yaml` with a `workspace` root. No `$HOME`
+  literal anywhere in code, prompts or defaults — enforced by `tests/test_portability.py`.
+- [x] Detect `ffmpeg`/`ffprobe` on `PATH` with a per-platform install hint; `/opt/homebrew`
+  gone from all five scripts that prepended it (A-3).
+- [x] `creatoros doctor`: binaries, Python version, config, workspace, keys and agent,
+  each with the exact fix. Required vs optional, so only a render-blocking failure exits
+  non-zero. A test asserts it never prints a secret.
+- [x] Dockerfile and `docker compose`, non-root, workspace as a volume.
+
+**Acceptance — met on macOS and Linux, CI covers Windows.**
+
+| | |
+|---|---|
+| macOS, Python 3.10, clean venv, outside the repo | 33.5 s 1080×1920 h264 MP4 in 22 s, no keys |
+| Linux (Docker, Python 3.12), read-only spec | same video, no keys |
+| Test suite | 352 tests, green on both |
+| `creatoros doctor` | passes on both with nothing configured |
+| Windows | covered by the CI matrix (ubuntu · macos · windows × 3.10 · 3.12) |
+
+CI is deliberately minimal here — it proves the acceptance criterion and nothing more.
+ruff, mypy, pre-commit and gitleaks are Phase 4, as planned.
+
+**Two things Phase 0 did not predict.**
+
+*The renderer could not render a read-only spec.* It wrote its scene intermediates and
+cover frame beside the **input**, so `creatoros render /app/examples/specs/kv-cache.json
+-o /workspace/out.mp4` died on a permission error for a path the user never named — in a
+container, and after any `pip install`. Artifacts now hang off the output path. Docker
+found this; macOS never would have, because there the repo is writable.
+
+*Two modules are not portable and never were.* `reel_engine.py` (the retired v1 renderer)
+and `codeswitch_bakeoff.py` (the TTS benchmark behind D-21's phantom backends) both shell
+out to macOS `say`. Deleting a renderer is a product decision, so they moved to
+`creatoros_autopilot/legacy/` instead: quarantined, imported by nothing — asserted, not
+assumed — and exempt from the portability rules so those rules can be strict everywhere
+else. **Phase 2 decides: port `say` into a real TTS provider with an `available()` check,
+or delete both. That one is Aman's call.**
 
 ### Phase 2 — Plugin system
 - Define the interfaces: `LLM`, `TTS`, `ResearchSource`, `Publisher`, `Style`, `Brand`, `Gate`.
 - Register via Python entry points. Core never imports a concrete provider.
 - Move the existing providers behind them. **Collapse the four Zernio clients into one**
-  (D-22). Make the README's TTS claim true or narrow it (D-21).
+  (D-22). The README's TTS claim is already narrowed to what is actually wired up (D-21),
+  with a test to stop it drifting again.
 - Add Ollama (local LLM) and Piper (local TTS) — this is the zero-cost path (A-5), and it
   is the feature that decides whether anyone tries this.
 - Add `local_folder` publisher (render, write metadata, publish nothing).

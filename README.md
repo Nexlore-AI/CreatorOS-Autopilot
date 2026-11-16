@@ -1,74 +1,125 @@
 # CreatorOS Autopilot
 
-An autonomous AI Shorts pipeline that researches what is new in AI, writes short explainer scripts, voices them in Hinglish, renders animated 1080×1920 videos and publishes them to **YouTube Shorts** and **Instagram Reels** every day, with no manual steps.
+Research what is new in your niche, write each video as a JSON spec, voice it, render an
+animated 1080×1920 MP4, and publish it to YouTube Shorts and Instagram Reels — on your own
+machine, with your own keys.
 
-It runs the [Nexlore AI](https://www.youtube.com/@NexloreAI/shorts) channels: [YouTube](https://www.youtube.com/@NexloreAI/shorts) · [Instagram](https://www.instagram.com/nexloreai/reels/)
+It runs the [Nexlore AI](https://www.youtube.com/@NexloreAI/shorts) channels every day:
+[YouTube](https://www.youtube.com/@NexloreAI/shorts) · [Instagram](https://www.instagram.com/nexloreai/reels/)
+
+> **Status: early.** Phase 1 of [the roadmap](docs/ROADMAP.md) has landed — the project is
+> an installable package with a cross-platform CLI, and it renders on macOS, Linux and
+> Windows with no API keys. The plugin system (Ollama, Piper, direct YouTube and Instagram
+> APIs) is Phase 2. Expect the command surface to be stable and the internals to move.
+
+## Try it — no keys, no accounts
+
+```bash
+pip install creatoros-autopilot      # Python 3.10+; also needs ffmpeg on PATH
+creatoros doctor                     # says exactly what is missing, if anything
+creatoros render examples/specs/kv-cache.json -o kv-cache.mp4
+```
+
+That writes a real 33-second video. Nothing is uploaded anywhere, and nothing asks you for
+a key — rendering is the part that is free and offline, and it is deliberately the first
+thing you can do.
+
+Or without installing anything but Docker:
+
+```bash
+docker compose run --rm creatoros render examples/specs/kv-cache.json -o /workspace/out.mp4
+```
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    A[launchd daily job] --> B[LLM agent<br/>Claude Code, headless]
-    B -->|web research + competitor scan| C[Topic + script<br/>JSON spec per video]
-    C --> D[Hinglish narration<br/>TTS per scene]
+    A[scheduler<br/>launchd · systemd · schtasks] --> B[LLM agent<br/>research + topic choice]
+    B --> C[Script<br/>JSON spec per video]
+    C --> D[Narration<br/>TTS per scene]
     D --> E[Renderer<br/>Pillow + NumPy + ffmpeg]
-    E --> F[Quality gates<br/>language mix, layout preview]
-    F --> G[Publisher<br/>Zernio API]
+    E --> F[Quality gates<br/>hook, title, language mix]
+    F --> G[Publisher]
     G --> H[YouTube Shorts]
     G --> I[Instagram Reels]
     G --> J[(Ledger<br/>idempotent posting)]
 ```
 
-1. **Research.** A headless LLM agent (`claude -p`) searches the last 48 hours of AI news, papers and enterprise stories, scans what is working for similar creators, and picks topics that have not been covered before (deduplicated against a history log).
-2. **Script.** Each video becomes a JSON spec: 6–8 typed scenes (`hook`, `section`, `stat`, `points`, `predict`, `cta`), a narration line per scene, sources, and per-platform titles, captions and tags. Writing rules live in `prompts/playbooks/`.
-3. **Voice.** Narration is Hindi–English code-switched ("Hinglish"). `shorts/make_audio.py` generates one clip per scene through a pluggable TTS backend (ElevenLabs, Azure AI Speech, OpenAI, Sarvam, Cartesia, Google, or macOS `say` as an offline fallback). `shorts/langmix.py` checks each script's English/Hindi balance before rendering.
-4. **Render.** `engine/shorts_engine.py` draws every frame at 2× with Pillow and NumPy (animated grid background, glass cards, code chips, progress bar, brand header), times each scene to its narration, ducks the music under the voice and encodes with ffmpeg. A contact-sheet preview is checked before the full render.
-5. **Publish.** `publish_zernio.py` uploads the same MP4 to YouTube and Instagram through the Zernio API at fixed IST slots. Every post is written to a ledger keyed on `(video, platform)`, so re-runs never double-post.
+1. **Research.** A headless LLM agent searches recent news and papers, scans what is
+   working for similar creators, and picks topics not covered before.
+2. **Script.** Each video becomes a JSON spec: typed scenes (`hook`, `section`, `stat`,
+   `points`, `predict`, `cta`), a narration line per scene, sources, and per-platform
+   metadata. The spec is the job — everything downstream reads it and nothing else.
+3. **Voice.** One clip per scene. A clip is only regenerated when its line changed, so a
+   re-render does not re-bill the whole video.
+4. **Render.** Every frame is drawn at 2× with Pillow and NumPy — animated grid, glass
+   cards, code chips, progress bar — timed to the narration, with the music ducked under
+   the voice, then encoded with ffmpeg.
+5. **Publish.** The same MP4 goes to each platform at its slot. Every post is recorded in
+   a ledger keyed on `(job id, platform)`, so a re-run never double-posts and a partial
+   failure retries only the platform that failed.
 
-## Design choices
+## Commands
 
-- **Config as data.** Each platform (`platforms/*.json`) and each content pillar (`pillars/*.json`) is a JSON file. Adding a platform or a series is a new file, not a code change. See [`STRUCTURE.md`](STRUCTURE.md).
-- **Render ahead, publish later.** Four videos take hours to render, so videos render one day and publish on the next day's slots. The pipeline always holds a day of stock, and a failed run does not leave a gap.
-- **Safe by default.** A lock prevents overlapping runs, a publish mode switch (`draft` / `schedule` / `auto`) controls what goes live, and the ledger makes publishing idempotent.
-- **No heavy dependencies.** The engine and the Zernio client use only the standard library plus Pillow and NumPy.
+| | |
+|---|---|
+| `creatoros doctor` | check dependencies, config and keys; says what to fix |
+| `creatoros render SPEC` | spec → MP4 (and a cover frame) |
+| `creatoros preview SPEC` | contact sheet of every scene, to check layout before rendering |
+| `creatoros audio SPEC` | narration + a music bed |
+| `creatoros publish VIDEO` | publish one video (`--dry-run` prints the payload and calls nothing) |
+| `creatoros run` | a full day: make the videos, then publish them |
+| `creatoros status` | what has run, what is still pending |
+| `creatoros schedule show\|install\|remove` | the daily job, as a native OS unit |
 
-## Tech stack
+## Configure
 
-Python · Bash · LLM agents (Claude Code) · Text-to-speech APIs (ElevenLabs, Azure AI Speech) · Pillow · NumPy · ffmpeg · Zernio REST API · macOS launchd
+Two files, and neither of them is code:
 
-## Repository layout
+- **`creatoros.yaml`** — settings. Copy [`creatoros.example.yaml`](creatoros.example.yaml).
+  [`examples/nexlore-ai/creatoros.yaml`](examples/nexlore-ai/creatoros.yaml) is a real
+  channel's configuration.
+- **`.env`** — secrets, and nothing else. Copy [`.env.example`](.env.example). Gitignored.
 
-```
-engine/            renderers (shorts_engine.py = current style, reel_engine.py = v1) and the Zernio client
-shorts/            the daily pipeline: run_shorts.sh, make_audio.py, langmix.py, STYLE.md, example specs
-prompts/           agent instructions and writing playbooks (story, Hinglish voice, metadata, critic)
-platforms/         one JSON per destination: format limits, caption rules, which API key reaches it
-pillars/           one JSON per content series: slot, ordering, schedule
-publish_*.py       publishers and draft promotion tools
-config.env         all non-secret settings
-.env.example       the secrets the pipeline can use (copy to .env)
-docs/OPERATIONS.md day-to-day commands and settings in detail
-```
+**Nothing publishes by default.** `publish.mode` ships as `draft` and `publish.platforms`
+ships empty, so until you change them the tool renders and stops.
 
-## Run it
+## What works today
 
-Requirements: macOS, Python 3.10+, ffmpeg, the Claude Code CLI, and API keys for one TTS service and Zernio.
+| | |
+|---|---|
+| **Renderer** | Pillow + NumPy + ffmpeg, one house style (`nexlore-v3`) |
+| **LLM agent** | Claude Code (`claude -p`), or none |
+| **TTS** | ElevenLabs, or none. *Piper, for a free offline path, is Phase 2.* |
+| **Publishing** | Zernio (YouTube + Instagram). *Direct YouTube Data API and Instagram Graph API are Phase 2, and become the documented default.* |
+| **Scheduling** | launchd (macOS), systemd user timers (Linux), Scheduled Tasks (Windows) |
+| **Platforms** | macOS, Linux, Windows, Docker |
 
-```bash
-cp .env.example .env               # add your keys; .env is gitignored
-brew install ffmpeg
-shorts/setup_shorts.sh             # creates .venv and installs the daily launchd job
-shorts/run_shorts.sh               # run the full pipeline now
-shorts/run_shorts.sh --status      # what has run today
-```
+An earlier version of this README listed seven TTS backends. Only ElevenLabs was ever on
+the live path; the rest existed in a benchmark script that nothing called. The table above
+is what is actually wired up, and a test keeps it honest.
 
-Render a single spec by hand:
+## Requirements
 
-```bash
-python3 engine/shorts_engine.py preview shorts/examples/kv-cache.json   # contact sheet
-python3 engine/shorts_engine.py render  shorts/examples/kv-cache.json   # full video
-```
+Python 3.10+ and ffmpeg. That is all for rendering. Narration needs a TTS key, publishing
+needs a publisher account, and the agent needs the Claude Code CLI — each optional, each
+reported by `creatoros doctor`.
 
-## Secrets
+## Contributing
 
-API keys are read from `.env` only, which is gitignored. `config.env` holds settings and never secrets. Background music is not included; add your own royalty-free tracks to `shorts/music/`.
+Issues and pull requests are welcome. The architecture, the phase plan and the open work
+are in [`docs/ROADMAP.md`](docs/ROADMAP.md); `CONTRIBUTING.md` and a set of
+`good first issue`s arrive in Phase 4.
+
+## Licence
+
+[AGPL-3.0-or-later](LICENSE). You can run, modify and redistribute this freely. If you run
+a **modified** version as a network service, the AGPL requires you to publish your changes.
+Contributions are covered by [CLA.md](CLA.md), which keeps a future hosted version
+possible.
+
+Third-party material, licences intact: the bundled YouTube skills are MIT (Jake
+Schincariol, `.claude/skills/YT_SKILLS_LICENSE`); Inter and Poppins are under the SIL Open
+Font License and DejaVu Sans Mono under its own
+([`creatoros_autopilot/render/fonts/README.md`](creatoros_autopilot/render/fonts/README.md)).
+No music is bundled — add your own royalty-free tracks to your workspace.

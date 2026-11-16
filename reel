@@ -1,5 +1,0 @@
-#!/bin/bash
-# Wrapper for the reel engine: uses the project's .venv (made by setup.sh) when it exists.
-D="$(cd "$(dirname "$0")" && pwd)"
-PY="$D/.venv/bin/python"; [[ -x "$PY" ]] || PY=python3
-exec "$PY" "$D/engine/reel_engine.py" "$@"

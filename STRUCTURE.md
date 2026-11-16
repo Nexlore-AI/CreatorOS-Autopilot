@@ -1,99 +1,63 @@
-# How this folder is organised
-
-The pipeline started as "4 Instagram reels a day". It now has to carry six platforms,
-several content pillars and a comment-to-DM flow. This file is the map.
-
-**The rule that keeps it scalable: a new platform or a new pillar is a new JSON file, not
-a new branch in the code.** Anything that differs per platform or per pillar lives in
-`platforms/` or `pillars/` as data. Code reads those files.
+# How this repository is organised
 
 ```
-automation/
-├── engine/              the renderer. JSON spec -> 1080x1920 MP4 + cover.jpg
-│   └── reel_engine.py
+creatoros_autopilot/
+├── core/          the job, and nothing OS-specific
+│   ├── settings.py    creatoros.yaml + .env; every path hangs off `workspace`
+│   ├── spec.py        the job payload: load, validate (render vs publish), job id
+│   ├── schedule.py    publish dates and slot decisions — see the note below
+│   ├── ledger.py      append-only publish record, keyed on (job id, platform)
+│   ├── lock.py        one run at a time, on every OS
+│   ├── media.py       finding ffmpeg, asking it things
+│   └── pipeline.py    a day's run: agent, then publish what was rendered
 │
-├── platforms/           ONE FILE PER PLATFORM - limits, formats, language, which key
-│   ├── instagram.json       enabled
-│   ├── youtube.json         enabled
-│   ├── linkedin.json        off, limits unverified
-│   ├── twitter.json         off, limits unverified
-│   ├── facebook.json        off, limits unverified
-│   └── medium.json          off, probably needs its own adapter
+├── render/        the renderer. JSON spec -> 1080x1920 MP4 + cover frame
+│   ├── engine.py      house style "nexlore-v3"
+│   ├── fonts/         package data, so a pip install renders
+│   └── assets/        package data
 │
-├── pillars/             ONE FILE PER CONTENT PILLAR - slot, order, schedule, spine
-│   ├── concept-series.json  10:00 IST, SEQUENTIAL
-│   ├── paper.json           11:15 IST
-│   ├── enterprise.json      12:30 IST
-│   ├── interview.json       13:45 IST, SEQUENTIAL
-│   ├── toolbox.json         15:00 IST
-│   └── myth.json            16:30 IST, weekends
+├── providers/     the backends
+│   ├── tts/           elevenlabs
+│   └── publish/       zernio (four copies of this client collapse into one in Phase 2)
 │
-├── prompts/
-│   ├── daily_run.md         what the agent does each run
-│   ├── upload_only.md
-│   └── playbooks/           the writing and craft rules (read these first)
-│
-├── state/               machine state, not content
-│   ├── series.json          arc queue + cursor for sequential pillars
-│   └── (resources.json)     comment -> resource delivery, when built
-│
-├── out/YYYY-MM-DD/      working files for one day: spec, mp4, cover, caption, STATUS.md
-├── specs/               reference specs
-├── assets/  fonts/      brand assets
-├── logs/
-│
-├── publish_queue.py     batch publisher, idempotent, ledger-backed
-├── publish_zernio.py    single-reel publisher + shared helpers
-├── promote_drafts.py    drafts -> live, whole post (both platforms)
-├── promote_instagram_backlog.py  drafts -> live on Instagram only, paced, dedup'd
-├── run_daily.sh         the daily runner launchd calls
-├── setup.sh             dependency check + launchd install
-├── config.env           settings (no secrets)
-├── .env                 secrets only, gitignored
-└── publish_ledger.jsonl what has been posted where - the idempotency record
+├── quality/       gates a script must pass: langmix (language mix)
+├── agents/        research and scripting; prompts as files
+├── cli/           the `creatoros` command, and `doctor`
+├── runtime/       THE ONLY PLACE for OS-specific code: notifications, config dirs, units
+└── legacy/        works, not portable, imported by nothing. Quarantined, not deleted.
+
+examples/
+├── specs/         example specs — these are what `creatoros render` runs in the README
+└── nexlore-ai/    a real channel's preset: config, house style, voice guide
+
+platforms/         one JSON per destination: format and text limits, which key reaches it
+pillars/           one JSON per content series: slot, ordering, schedule
+prompts/           writing playbooks (story, Hinglish voice, metadata, critic)
+tests/
+docs/              ROADMAP.md, OPERATIONS.md, MUSIC.md
 ```
 
-## platforms/*.json
+## The rules that keep this shape
 
-Each file describes one destination: formats and their limits, text limits and the fold,
-hashtag counts, where the cover image comes from, the narration language register, and
-**which Zernio API key reaches it**. `"enabled": false` means the publisher skips it.
+**OS-specific code lives in `runtime/` and nowhere else.** Not as a convention —
+`tests/test_portability.py` reads the AST of every module and fails if `core/`, `render/`,
+`providers/`, `quality/` or `cli/` invokes `launchctl`, `osascript`, `systemctl`,
+`schtasks` or `say`, branches on `sys.platform`, or contains a path from someone's home
+folder.
 
-`"verified": true` marks a number confirmed against a primary source in this project.
-Anything `false` is a placeholder and must be checked before that platform is turned on.
+**No date arithmetic in a shell.** The pipeline used to compute slot times with BSD
+`date -j -v+Nd`, which is macOS-only and whose failure was swallowed by a fallback. On
+Linux every slot compared as already past, so a run published the whole day at once
+instead of scheduling it. All of it is now `core/schedule.py`, and the regression is
+`tests/test_schedule.py::TestNeverPublishesEarly`.
 
-Adding LinkedIn = fill in its limits, set `enabled: true`, point `zernio_key` at the key
-whose Zernio account actually has LinkedIn attached. No code change.
+**A new platform or pillar is a new file, not a new branch in the code.** `platforms/` and
+`pillars/` are data. They are not read by code yet — Phase 2 wires them up, which is when
+the publisher stops carrying its own limits table.
 
-## The multi-key problem
+**Secrets are only ever in `.env`, and only ever in the environment.** No `Settings`
+object holds a key, so nothing that logs or dumps settings can leak one.
 
-Zernio allows **2 connected accounts per Zernio account**, so six platforms need three
-Zernio accounts and three API keys: `ZERNIO_API_KEY`, `ZERNIO_API_KEY_2`,
-`ZERNIO_API_KEY_3`.
-
-Consequence worth understanding: today one post can target Instagram *and* YouTube
-together because both sit behind one key. Once platforms are split across keys, a single
-reel becomes **one Zernio post per key**. The ledger is already keyed on
-`(relative path, platform)`, so that fan-out is safe — but the idempotency key and the
-"one upload, many platforms" optimisation both become per-key.
-
-## pillars/*.json
-
-`order: "sequential"` pillars pull their next topic from `state/series.json`, which holds
-an arc queue and a cursor, so tomorrow's episode is deterministic and a week adds up to
-one subject. `order: "random"` pillars pick fresh each day and dedupe against
-`history.jsonl`.
-
-`schedule_ist` is the IST time that pillar runs. `also_story` means the same vertical
-video is also posted as an Instagram Story. `resource` names what a commenter gets sent
-when the comment-to-DM flow is built.
-
-## What is NOT here yet
-
-- **Comment -> DM resource delivery.** Feasibility is being researched; it depends on
-  whether Zernio exposes comments and DMs, and on Meta's policy for follow-gated
-  automated messages.
-- **LinkedIn / X / Facebook / Medium adapters.** The descriptors exist; the limits are
-  unverified and the platforms are off.
-- **Stories.** `also_story` is declared but nothing reads it yet.
-- **Per-pillar scheduling.** `schedule_ist` is declared; launchd still runs one daily job.
+**Job output never goes in the repo.** Renders, logs, the ledger and the music library all
+live under `workspace`, which comes from config. A `pip install` must not write into
+site-packages and a `git pull` must not fight with a day's output.
