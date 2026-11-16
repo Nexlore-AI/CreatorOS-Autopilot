@@ -1,6 +1,6 @@
 # CreatorOS Autopilot — Roadmap
 
-**Status:** Phase 1 complete (PR #2). Phase 0's audit stands as written below; findings
+**Status:** Phases 1 and 2 complete (PRs #2, #3). Phase 0's audit stands as written below; findings
 it fixed are marked ✅. The four decisions in §6 were answered on
 2026-11-17 and are recorded there. Phases 1–7 are proposed, not started.
 
@@ -310,25 +310,49 @@ assumed — and exempt from the portability rules so those rules can be strict e
 else. **Phase 2 decides: port `say` into a real TTS provider with an `available()` check,
 or delete both. That one is Aman's call.**
 
-### Phase 2 — Plugin system
-- Define the interfaces: `LLM`, `TTS`, `ResearchSource`, `Publisher`, `Style`, `Brand`, `Gate`.
-- Register via Python entry points. Core never imports a concrete provider.
+### Phase 2 — Plugin system ✅
+
+*Landed. Fixes D-20 … D-24, and the three modules Phase 1 silently broke.*
+
+- [x] Define the interfaces: `LLM`, `TTS`, `ResearchSource`, `Publisher`, `Style`, `Brand`, `Gate`.
+- [x] Register via Python entry points. Core never imports a concrete provider —
+  `test_core_names_no_provider` reads the AST and fails on an import or a comparison.
 - Move the existing providers behind them. **Collapse the four Zernio clients into one**
   (D-22). The README's TTS claim is already narrowed to what is actually wired up (D-21),
   with a test to stop it drifting again.
-- Add Ollama (local LLM) and Piper (local TTS) — this is the zero-cost path (A-5), and it
-  is the feature that decides whether anyone tries this.
-- Add `local_folder` publisher (render, write metadata, publish nothing).
-- Add direct YouTube Data API and Instagram Graph API publishers beside Zernio. These are
-  the **documented default for new users**; Zernio stays fully supported and stays the
-  Nexlore preset's publisher; `local_folder` is the actual first-run default, so trying the
-  project needs no paid account and no OAuth app (decision 4).
-- Keep `containsSyntheticMedia` as a default the interface sets, not something a provider
-  may forget.
+- [x] Add Ollama (local LLM) and Piper (local TTS) — the zero-cost path (A-5).
+- [x] Add `local_folder` publisher: writes the video plus the metadata that *would* have
+  been sent to each platform, so it doubles as a dry practice run for a real one.
+- [x] Add direct YouTube Data API and Instagram Graph API publishers beside Zernio, as the
+  documented default for new users (decision 4). Zernio stays fully supported and stays the
+  Nexlore preset's publisher.
+- [x] Keep the AI-narration disclosure. Zernio sets `containsSyntheticMedia`; the Data API
+  has no such field, so the YouTube backend says so loudly rather than dropping it silently.
 
-**Acceptance:** a new TTS provider is one file plus one entry point, with no change under
-`core/` — proved by a test that registers a fake provider and renders through it. A full
-run completes with `llm=ollama`, `tts=piper`, `publish=local_folder` and no network.
+**Acceptance — met.** `tests/test_plugins.py::TestAcceptance` writes a TTS provider,
+registers it, narrates through it, proves the shared caching and stale-clip cleanup apply
+to it unchanged, and then reads the AST of every file in `core/` to assert it names no
+provider. A full keyless run — render plus `publish=local_folder`, no network, no key —
+completes and writes the video with its would-be metadata.
+
+**Four defects this phase surfaced, three of them mine:**
+
+1. **Three modules had been broken since Phase 1.** `queue.py`, `promote.py` and
+   `promote_instagram.py` still did `import publish_zernio` after the file was renamed —
+   the exact sibling-import problem (E-25) the move was meant to end. 665 tests and six
+   green CI jobs never noticed, because nothing imported them. `tests/test_imports.py` now
+   imports every module in the package; it is the cheapest guard against that whole class
+   of bug and it caught all three immediately.
+2. **`backends: [local_folder]` was routed to the live YouTube API.** The backend advertised
+   only `"local"`, so routing skipped it and fell through to a real publisher. A user asking
+   for a dry practice run would have attempted a real upload. Wildcard backends and a
+   three-rule routing order fix it.
+3. **One backend was called once per platform.** Routes were grouped by object identity, but
+   the registry returns a fresh instance per lookup — so Zernio, whose whole advantage is
+   that one upload serves both platforms, would have uploaded twice and created two posts
+   where Phase 1 created one.
+4. The Zernio collapse is real: four clients, ~1,170 lines, became one `_api.py` that the
+   publisher plugin and all three operational tools call.
 
 ### Phase 3 — Config, brands and onboarding
 - `creatoros init`: interactive wizard writing `creatoros.yaml` and `.env`; secrets never
