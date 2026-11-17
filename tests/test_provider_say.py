@@ -431,5 +431,20 @@ class TestOnThisMac:
         assert abs(emphasised - self._spoken(tmp_path, "Samantha", "Revenue grew fast.")) < 0.05
 
     def test_a_hyphen_line_renders_end_to_end(self, tmp_path):
-        clip = say_mod.Say().synthesize("-20 percent is what it costs.", tmp_path / "h.mp3")
-        assert media.duration(str(clip)) > 1.0
+        """A line starting with `-` must be spoken, not parsed by `say` as an option.
+
+        Measured against a control sentence of similar length rather than an absolute
+        duration. This test has no `_needs(voice)` guard because it deliberately uses the
+        default voice — and a GitHub macOS runner's default voice produced a 0.005 s clip
+        for every input, which failed the build for a reason that had nothing to do with
+        hyphens. If the control is silent the runner has no usable voice, and there is
+        nothing here to test.
+        """
+        backend = say_mod.Say()
+        control = backend.synthesize("20 percent is what it costs.", tmp_path / "c.mp3")
+        baseline = media.duration(str(control))
+        if baseline < 0.5:
+            pytest.skip(f"the default voice produced {baseline:.3f}s for a plain line — "
+                        f"this machine has no voice that speaks it")
+        clip = backend.synthesize("-20 percent is what it costs.", tmp_path / "h.mp3")
+        assert media.duration(str(clip)) > baseline * 0.5
