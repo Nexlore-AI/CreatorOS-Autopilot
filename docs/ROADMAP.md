@@ -1,6 +1,7 @@
 # CreatorOS Autopilot — Roadmap
 
-**Status:** Phases 1–4 complete (PRs #2, #3, #4, #5). Phase 0's audit stands as written below; findings
+**Status:** Phases 1–5 complete (PRs #2–#6). Phase 6 (migrate the channel) needs Aman at
+the keyboard; Phase 7 is a document. Phase 0's audit stands as written below; findings
 it fixed are marked ✅. The four decisions in §6 were answered on
 2026-11-17 and are recorded there. Phases 1–7 are proposed, not started.
 
@@ -447,15 +448,30 @@ It was briefly **nine minutes**, from two bugs introduced in Phase 3 and caught 
 are written up in that phase; the second is the one worth remembering, because it would
 only ever have appeared under the multiprocessing render.
 
-### Phase 5 — Launch-ready README and assets
-- Rewrite the README to the brief's structure: pitch, demo, 3-command quickstart, features,
-  provider support matrix, Mermaid architecture diagram, roadmap, contributing, badges.
-- Example gallery, GitHub topics, social preview spec.
-- `docs/LAUNCH.md`: Show HN, Product Hunt, Reddit, X, LinkedIn, Dev.to, with drafts written
-  first-person and concrete — real numbers from the channel, no hype words.
+### Phase 5 — Launch-ready README and assets ✅
 
-**Acceptance:** every command in the README runs clean on a fresh clone. The provider matrix
-matches what is registered, checked by a test so it cannot drift (D-21 again).
+- [x] Rewrite the README to the brief's structure: pitch, demo, 3-command quickstart, features,
+  provider support matrix, Mermaid architecture diagram, roadmap, contributing, badges.
+- [x] Example gallery (the same spec under three brands, rendered), GitHub topics, and a
+  social preview spec with the crop-safe area called out.
+- [x] `docs/assets/demo.gif` is a **real render** of a shipped example, not a placeholder.
+- [x] `docs/LAUNCH.md`: Show HN, Product Hunt, Reddit, X, LinkedIn, Dev.to. Each draft
+  leads with the `date -j` bug rather than a feature list, because an honest failure is the
+  most credible thing this project has to say.
+- [x] A pre-launch checklist that blocks on the things that would embarrass us: the PyPI
+  name unclaimed, the live-API publishers unrun, zero open issues.
+
+**Acceptance — met, and one claim corrected.**
+
+Every command in the README was run before it was committed. The provider matrix matches
+the registry.
+
+**The track record in the first draft was wrong.** It said the pipeline had run "every day
+since 2026-11-16" and, in the Show HN draft, that I had written it "about a year ago".
+Checking `history.jsonl` and the ledger: **49 videos across 8 publishing days, 2026-11-07 to
+2026-11-16**. Both claims are now the measured figure, and `LAUNCH.md` opens with a rule that
+every number in a draft must be checkable — a launch post with one disprovable figure is
+worse than no launch post.
 
 ### Phase 6 — Migrate the channel
 Per §4. **Acceptance:** one full day rendered and published through the new CLI, matching
