@@ -1,0 +1,42 @@
+# Ember — a five-minute morning fitness channel, in English.
+#
+# Here to prove the abstractions are real. Nothing in CreatorOS knows this channel is about
+# fitness rather than transformers: the difference between it and the Nexlore preset is
+# entirely in these files.
+#
+# It also shows the shape most people will start from — free providers, nothing published
+# automatically, one video a day.
+
+workspace: ""
+timezone: Europe/Berlin
+style: nexlore-v3
+brand: brand.yaml
+
+content:
+  videos_per_day: 1
+  run_at: "05:30"
+  pillars_dir: pillars
+
+agent:
+  provider: claude_code
+
+tts:
+  backend: piper          # free, local, offline
+  voice_id: en_GB-alba-medium
+
+music:
+  mode: library
+
+publish:
+  # Draft: posts are created and parked for review. Change this when you trust it.
+  mode: draft
+  platforms: [instagram, youtube]
+  backends: [youtube, instagram]   # direct APIs, no third-party relay
+  offset_days: 0                   # Instagram's Graph API cannot schedule a Reel
+  post_times: ["06:30"]
+  youtube:
+    visibility: public
+    category_id: "17"              # Sports
+
+# No gates: this channel writes in one language, so there is no mix to measure.
+gates: []

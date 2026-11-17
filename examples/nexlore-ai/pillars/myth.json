@@ -1,0 +1,16 @@
+{
+  "display": "Wrong Picture",
+  "slot": "06",
+  "order": "random",
+  "schedule_ist": "16:30",
+  "days": "sat,sun",
+  "spine": "you-have-the-wrong-picture",
+  "brief": "A widely repeated AI claim that is wrong or badly oversimplified, corrected with evidence. Weekend slot.",
+  "platforms": [
+    "instagram",
+    "youtube"
+  ],
+  "voice_lang": "hinglish",
+  "also_story": true,
+  "resource": "sources"
+}

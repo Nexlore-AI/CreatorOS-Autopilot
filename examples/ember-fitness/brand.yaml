@@ -1,0 +1,25 @@
+# A second brand, in a different niche and a different language, to show what changes.
+#
+# No logo: this kit renders a wordmark instead, which is the common case. Nothing here is
+# required — delete everything but `name` and it still renders.
+
+name: Ember
+tagline: Five minutes. Every morning.
+cta: Follow Ember
+
+palette:
+  background: "#1A0D08"
+  background_low: "#2B1206"
+  accent: "#FF7A18"        # the one warm colour, used once per scene
+  accent_2: "#E8542F"
+  accent_3: "#B23A48"
+  accent_4: "#5C1A2E"
+  glow_top: "#7A2E0B"
+  glow_bottom: "#3D0F1E"
+  card: "#2A1510"
+  border: "#4A2418"
+  muted: "#C9A08C"
+  soft: "#E8D5C9"
+
+language:
+  primary: en

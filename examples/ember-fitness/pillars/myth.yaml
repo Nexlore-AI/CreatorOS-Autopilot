@@ -1,0 +1,15 @@
+display: Gym Myth, Buried
+slot: 2
+cadence: weekly        # Mondays
+at: "18:00"
+order: sequential
+brief: >
+  One piece of fitness folklore, and what the evidence actually says. Say what is true in
+  it before saying what is wrong — people believe these for a reason.
+series:
+  - "You must stretch before lifting"
+  - "Soreness means it worked"
+  - "Lifting makes you bulky"
+  - "You lose the window if you do not eat within 30 minutes"
+  - "Spot reduction"
+platforms: [instagram, youtube]

@@ -1,0 +1,9 @@
+display: Concepto del día
+slot: 1
+cadence: daily
+at: "09:00"
+order: random
+brief: >
+  Una idea, explicada en menos de un minuto. Empieza por la pregunta que el espectador ya
+  se hacía. Nada de jerga sin explicar.
+platforms: [youtube]

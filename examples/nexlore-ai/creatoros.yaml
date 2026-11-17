@@ -14,10 +14,14 @@ workspace: ""              # set this to where your renders should live
 timezone: Asia/Kolkata
 
 style: nexlore-v3
+# The wordmark, palette, fonts and the Hinglish language mix — all of which used to be
+# welded into the renderer and the prompts. `creatoros brands` lists what is available.
+brand: nexlore-ai
 
 content:
   videos_per_day: 4
   run_at: "06:30"
+  pillars_dir: pillars
 
 agent:
   provider: claude_code
@@ -48,3 +52,8 @@ publish:
   youtube:
     visibility: public
     category_id: "28"
+
+# The language-mix gate reads the brand's `language` block: Hindi grammar, ~45% English
+# vocabulary, Devanagari script. It was a lexicon and a hard 38-55% band compiled into the
+# pipeline; a channel in one language now simply has nothing for it to measure.
+gates: [langmix]

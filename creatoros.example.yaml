@@ -14,9 +14,19 @@ timezone: UTC
 
 style: nexlore-v3
 
+# A brand kit: the name, logo, colours, fonts and language on every frame. Empty is the
+# neutral built-in look — a default, not anyone's identity. `creatoros brands` lists them;
+# a kit is a YAML file in ./brands/, your config directory, or beside this file.
+brand: ""
+
 content:
   videos_per_day: 1
   run_at: "06:30"          # when `creatoros run --if-due` considers itself due
+  # Content pillars: the recurring series this channel publishes, each with its own brief,
+  # slot and cadence (daily, weekdays, weekends, weekly, monthly). A relative path resolves
+  # against THIS file, so a preset folder can be copied anywhere and still work.
+  pillars_dir: pillars
+  pillars: []              # empty = every pillar in that directory
 
 agent:
   provider: none           # none | claude_code
@@ -42,3 +52,8 @@ publish:
   youtube:
     visibility: public     # public | unlisted | private
     category_id: "28"      # 28 = Science & Technology
+
+# Quality gates, opt-in. These encode a house style, and one channel's house style is not
+# a universal truth — `langmix` measures how much of a second language is in the narration
+# and only applies when the brand declares a mix. `creatoros doctor` lists what is installed.
+gates: []

@@ -1,0 +1,22 @@
+# A Spanish-language kit. The language block is what the mix gate reads; with no
+# `secondary` and no `ratio`, the gate has nothing to enforce and stays quiet.
+#
+# This is the point of making language a setting: Hinglish was a lexicon and a hard
+# 38–55% band compiled into the pipeline. Here it is one point in a space.
+
+name: Claro
+tagline: Una idea al día.
+cta: Sígueme
+
+palette:
+  background: "#071A14"
+  background_low: "#0B2A1F"
+  accent: "#2DD4A7"
+  accent_2: "#1E9E86"
+  accent_3: "#15706B"
+  accent_4: "#0B3D3F"
+  glow_top: "#0E4F45"
+  glow_bottom: "#123A2E"
+
+language:
+  primary: es
