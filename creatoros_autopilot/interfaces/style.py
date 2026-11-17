@@ -29,10 +29,16 @@ class Style(Protocol):
     def available(self) -> Availability:
         ...
 
-    def render(self, spec: dict, spec_path: Path, out: Path | None = None) -> Path:
-        """Spec to video. Writes a cover frame beside the output."""
+    def render(self, spec: dict, spec_path: Path, out: Path | None = None,
+               brand=None) -> Path:
+        """Spec to video. Writes a cover frame beside the output.
+
+        `brand` is a loaded brand kit, or None for the style's own default. A style is free
+        to ignore it, but one that draws a name or a palette should not hard-code either.
+        """
         ...
 
-    def preview(self, spec: dict, spec_path: Path, out: Path | None = None) -> Path:
+    def preview(self, spec: dict, spec_path: Path, out: Path | None = None,
+                brand=None) -> Path:
         """One still per scene as a contact sheet — the cheap check before a long render."""
         ...

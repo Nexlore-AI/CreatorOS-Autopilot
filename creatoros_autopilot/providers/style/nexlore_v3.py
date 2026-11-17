@@ -38,8 +38,10 @@ class NexloreV3:
                                    "reinstall creatoros-autopilot")
         return Availability.yes(f"{self.width}x{self.height} · ffmpeg {found['ffmpeg']}")
 
-    def render(self, spec: dict, spec_path: Path, out: Path | None = None) -> Path:
-        return Path(engine.run("render", spec_path, str(out) if out else None))
+    def render(self, spec: dict, spec_path: Path, out: Path | None = None,
+               brand=None) -> Path:
+        return Path(engine.run("render", spec_path, str(out) if out else None, kit=brand))
 
-    def preview(self, spec: dict, spec_path: Path, out: Path | None = None) -> Path:
-        return Path(engine.run("preview", spec_path, str(out) if out else None))
+    def preview(self, spec: dict, spec_path: Path, out: Path | None = None,
+                brand=None) -> Path:
+        return Path(engine.run("preview", spec_path, str(out) if out else None, kit=brand))

@@ -85,7 +85,8 @@ langmix = "creatoros_autopilot.providers.gate.langmix:LanguageMix"
 include = ["creatoros_autopilot*"]
 
 [tool.setuptools.package-data]
-"creatoros_autopilot.render" = ["fonts/*.otf", "fonts/*.ttf", "fonts/README.md", "assets/*.png"]
+"creatoros_autopilot.render" = ["fonts/*.otf", "fonts/*.ttf", "fonts/README.md"]
+"creatoros_autopilot.brands" = ["*.yaml", "*.md", "assets/*.png"]
 "creatoros_autopilot.agents" = ["prompts/*.md"]
 
 [tool.pytest.ini_options]
