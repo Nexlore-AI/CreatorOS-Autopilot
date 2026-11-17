@@ -4,28 +4,45 @@
 !.env.example
 *.env.bak*
 
-# ---- Local runtime state and output ----
-.venv/
+# ---- Local config and workspace ----
+# Your own creatoros.yaml is yours, not the project's; creatoros.example.yaml is the
+# template. Anchored to the repo root with a leading slash: an unanchored `creatoros.yaml`
+# matches at every level and silently swallowed examples/nexlore-ai/creatoros.yaml, which
+# CI caught only because a test read it.
+/creatoros.yaml
+!examples/**/creatoros.yaml
+workspace/
 out/
 logs/
-history.jsonl
-publish_ledger.jsonl*
-shorts/history.jsonl
-shorts/ledger.jsonl
-shorts/music_used.json
-shorts/music/*.mp3
-voice_auditions/
-engine/tts/bakeoff_out/
-_to_delete/
+*.jsonl
+!examples/**/*.jsonl
+
+# ---- Media: user content, and too big for git ----
 *.mp3
 *.wav
 *.aiff
 *.mp4
+!examples/specs/*.jpg
 
-# ---- Editor / OS / Python ----
-.DS_Store
+# ---- Python ----
+.venv/
+venv/
 __pycache__/
 *.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- Editor / OS ----
+.DS_Store
+Thumbs.db
 *.bak
 *.bak.*
+.idea/
+.vscode/
 .claude/settings.local.json

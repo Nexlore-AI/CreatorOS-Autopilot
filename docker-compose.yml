@@ -1,0 +1,19 @@
+# docker compose run --rm creatoros doctor
+# docker compose run --rm creatoros render examples/specs/kv-cache.json -o /workspace/out.mp4
+services:
+  creatoros:
+    build: .
+    image: creatoros-autopilot:local
+    volumes:
+      # Renders, logs, the ledger and your music library. Everything the tool writes.
+      - ./workspace:/workspace
+      # Your settings, read-only inside the container.
+      - ./creatoros.yaml:/app/creatoros.yaml:ro
+    # Secrets come from the environment, never from the image or from compose.yml.
+    # Create .env from .env.example; it is gitignored.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CREATOROS_WORKSPACE: /workspace
+    command: ["doctor"]

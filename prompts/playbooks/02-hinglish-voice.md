@@ -1,7 +1,7 @@
 # Hinglish narration
 
 **Every slot is Hinglish now** — research, paper, explainer, enterprise. Not pure Hindi,
-not pure English. `HINGLISH_SLOTS="all"` in config.env.
+not pure English. Every video in this preset is narrated this way.
 
 The target is how an Indian engineer actually explains something to another engineer over
 chai: the sentence runs in Hindi, the technical nouns stay in English, and nobody
@@ -108,4 +108,4 @@ rejects over 45s. Measured on a 159-character Hinglish passage:
 | Ananya — Deep, Calm and Steady | `fG9s0SXJb213f4UxVHyG` | 117.5 wpm | 25.1% longer — **overruns the 45s gate** |
 
 A voice 25% slower than baseline needs the word budget cut from ~90 to ~70, not a longer
-reel. Set the chosen voice in `config.env` as `ELEVENLABS_VOICE_ID`.
+reel. Set the chosen voice as `tts.voice_id` in `creatoros.yaml`.

@@ -1,0 +1,57 @@
+# Phase 1 CI: proves the acceptance criterion — a fresh clone renders on Linux, macOS and
+# Windows with no API keys. Linting, typing and secret scanning arrive in Phase 4.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Install
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      # The environment is deliberately bare: no key is set, so anything that quietly
+      # depended on one fails here rather than in a user's first five minutes.
+      - name: Tests
+        run: pytest -q
+
+      - name: Doctor
+        run: creatoros doctor
+
+      - name: Render an example with no API keys
+        run: creatoros render examples/specs/kv-cache.json -o kv-cache.mp4
+
+      - name: Check the render is a real video
+        shell: bash
+        run: |
+          ffprobe -v error -show_entries format=duration -of csv=p=0 kv-cache.mp4
+          test -s kv-cache.mp4

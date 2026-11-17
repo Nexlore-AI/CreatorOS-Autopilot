@@ -1,0 +1,44 @@
+# CreatorOS Autopilot — settings. Copy to creatoros.yaml and edit.
+# Secrets never go in this file. They live in .env, which is gitignored.
+#
+# Precedence: command-line flag > environment variable > this file > built-in defaults.
+# Check what is actually in effect with: creatoros doctor
+
+# Where renders, logs, the ledger and the music library live. Anything but a path inside
+# the installed package or the clone — a `pip install` must not write into site-packages.
+# Leave empty to use your platform's data directory (`creatoros doctor` prints which).
+workspace: ""
+
+# An IANA timezone. Every slot time below is wall-clock time in this zone.
+timezone: UTC
+
+style: nexlore-v3
+
+content:
+  videos_per_day: 1
+  run_at: "06:30"          # when `creatoros run --if-due` considers itself due
+
+agent:
+  provider: none           # none | claude_code
+  max_turns: 240
+  prompt: ""               # path to your own agent prompt; empty uses the bundled one
+
+tts:
+  backend: none            # none | elevenlabs   (piper, the free local one, lands in Phase 2)
+  voice_id: ""
+  model: eleven_multilingual_v2
+
+music:
+  mode: library            # library | generate | none
+  dir: ""                  # empty = <workspace>/music
+
+publish:
+  # draft never publishes: posts are created and parked for you to review. This is the
+  # default on purpose — a tool that posts in your name should not do so until you say so.
+  mode: draft              # draft | auto
+  platforms: []            # e.g. [instagram, youtube]. Empty = render only, publish nothing.
+  offset_days: 1           # publish onto a LATER day's slots, so a long render never races the clock
+  post_times: ["09:00"]    # one per video, matched to its 0N_ filename prefix
+  youtube:
+    visibility: public     # public | unlisted | private
+    category_id: "28"      # 28 = Science & Technology

@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "creatoros-autopilot"
+version = "0.1.0"
+description = "Research, write, voice, render and publish short videos on autopilot — with your own keys, on any OS."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Aman Kaushik" }]
+keywords = ["video", "shorts", "reels", "youtube", "instagram", "tts", "automation", "content"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video",
+]
+
+# Three runtime dependencies, all of them boring:
+#   pillow + numpy  the renderer draws every frame itself; they were already the only deps
+#   pyyaml          reads creatoros.yaml, which replaced a config file only Bash could read
+#   tzdata          Windows ships no tz database, and without it every slot time fails
+# Everything else is the standard library. pydantic and an HTTP client were considered and
+# deferred: the spec schema moves to pydantic in Phase 2, and urllib already does the job.
+dependencies = [
+    "pillow>=10.0",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+    "tzdata>=2024.1; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.urls]
+Homepage = "https://github.com/Nexlore-AI/CreatorOS-Autopilot"
+Repository = "https://github.com/Nexlore-AI/CreatorOS-Autopilot"
+Issues = "https://github.com/Nexlore-AI/CreatorOS-Autopilot/issues"
+
+[project.scripts]
+creatoros = "creatoros_autopilot.cli.main:main"
+
+[tool.setuptools.packages.find]
+include = ["creatoros_autopilot*"]
+
+[tool.setuptools.package-data]
+"creatoros_autopilot.render" = ["fonts/*.otf", "fonts/*.ttf", "fonts/README.md", "assets/*.png"]
+"creatoros_autopilot.agents" = ["prompts/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
