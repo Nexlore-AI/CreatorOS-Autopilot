@@ -51,12 +51,40 @@ def check(path: Path) -> list[str]:
     return problems
 
 
+def check_template(path: Path) -> list[str]:
+    """Every assignment in a `.env` template must have an empty value.
+
+    This replaces a gitleaks rule rather than merely suppressing it. `.env.example` exists
+    to contain no secrets, so gitleaks' `generic-api-key` matches the variable names and
+    reports a leak on every push. Suppressing that rule would also stop it catching a real
+    key pasted into the same file — so the suppression is paired with this, which is
+    stricter: gitleaks only catches a value matching one of its patterns, this rejects any
+    value at all.
+    """
+    problems = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        key, sep, value = stripped.partition("=")
+        if sep and value.strip():
+            problems.append(
+                f"{path}:{number}: {key.strip()} has a value. A template must ship empty "
+                f"placeholders only — put real keys in .env, which is gitignored.")
+    return problems
+
+
 def main(argv: list[str]) -> int:
     problems = []
+    templates = False
     for name in argv:
+        if name == "--template":
+            templates = True
+            continue
         path = Path(name)
-        if path.is_file():
-            problems += check(path)
+        if not path.is_file():
+            continue
+        problems += check_template(path) if templates else check(path)
     if problems:
         print("Secrets do not belong in a config file:", file=sys.stderr)
         for problem in problems:

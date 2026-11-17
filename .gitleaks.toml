@@ -1,0 +1,21 @@
+# gitleaks configuration.
+#
+# One allowlist, and it is narrower than it looks.
+#
+# `.env.example` is the template a user copies to `.env`. Every line in it is a variable
+# name with an EMPTY value — `ZERNIO_API_KEY=` and nothing after the equals sign — and
+# gitleaks' `generic-api-key` rule matches the name alone, so it reports a leak on a file
+# whose entire purpose is to contain no secrets.
+#
+# It is not simply excluded. `scripts/check_no_secrets.py --template .env.example` asserts
+# that every assignment in it is empty, and CI runs that on every push. That is a STRICTER
+# check than the rule being suppressed: gitleaks would only catch a value matching one of
+# its patterns, while this rejects any value at all.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+[rules.allowlist]
+paths = ['''^\.env\.example$''']

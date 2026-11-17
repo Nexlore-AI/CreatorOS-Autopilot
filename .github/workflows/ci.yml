@@ -41,9 +41,31 @@ jobs:
           # gitleaks needs the history, not just the tip, or a key committed three
           # commits ago and removed in the fourth goes unnoticed.
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The gitleaks *binary* is MIT and free. The gitleaks *Action* requires a paid
+      # licence for organization-owned repositories and fails with
+      # "[Nexlore-AI] is an organization. License key is required." — so this runs the
+      # tool directly. Same scan, no licence, one fewer third party in CI.
+      - name: Install gitleaks
+        run: |
+          VERSION=8.21.2
+          curl -sSfL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan the full history
+        run: gitleaks detect --source . --config .gitleaks.toml --redact --exit-code 1
+
+      - name: Scan the working tree
+        run: gitleaks detect --source . --no-git --config .gitleaks.toml --redact --exit-code 1
+
+      # Pairs with the one allowlist in .gitleaks.toml, and is stricter than the rule it
+      # replaces: every placeholder in the template must be empty, not merely
+      # unrecognisable to a pattern.
+      - name: The .env template contains no values
+        run: python scripts/check_no_secrets.py --template .env.example
 
   test:
     name: ${{ matrix.os }} · python ${{ matrix.python }}
