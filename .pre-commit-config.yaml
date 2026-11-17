@@ -1,0 +1,42 @@
+# Fast checks only. A pre-commit hook that takes a minute is a hook people disable, so the
+# render and provider tests are left to CI; everything here runs in about a second.
+#
+#   pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+        # Formatting is check-only for now. The renderer is written as dense drawing code
+        # on purpose, and reformatting it would be a large diff through the only code
+        # whose output is verified pixel-for-pixel.
+        stages: [manual]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        # Voice models are ~60 MB and video is larger still. Neither belongs in git.
+        args: [--maxkb=2048]
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: no-secrets-in-config
+        name: creatoros.yaml holds no secrets
+        entry: python scripts/check_no_secrets.py
+        language: system
+        files: '(creatoros\.yaml|creatoros\.example\.yaml|examples/.*\.yaml|brands/.*\.yaml)$'
+        pass_filenames: true

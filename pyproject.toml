@@ -41,7 +41,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11", "pre-commit>=3.8"]
 
 [project.urls]
 Homepage = "https://github.com/Nexlore-AI/CreatorOS-Autopilot"
@@ -92,3 +92,71 @@ include = ["creatoros_autopilot*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    # Not ours to reformat. The bundled YouTube skills are MIT (Jake Schincariol) and
+    # carry their own licence; reformatting vendored code loses the diff against upstream
+    # for no benefit.
+    ".claude",
+    # Works, not portable, imported by nothing. Linting a quarantine makes it look alive.
+    "creatoros_autopilot/legacy",
+]
+
+[tool.ruff.lint]
+# Deliberately a short list. A linter that fires on style nobody agreed to is a linter
+# contributors learn to ignore, and the rules below are the ones that catch real mistakes:
+# undefined names, mutable default arguments, bare excepts, shadowed builtins, dead imports.
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "RUF"]
+ignore = [
+    "E501",    # line length is checked by the formatter, not twice
+    "B008",    # function call in a default argument — intentional for Path() defaults
+    "SIM108",  # ternaries are not always clearer than an if
+    "RUF012",  # ClassVar annotations on plugin class attributes add noise, not safety
+    # The narration is Devanagari and the docs quote it. Flagging those characters as
+    # "ambiguous unicode" is correct in general and wrong here: they are the subject.
+    "RUF001", "RUF002", "RUF003",
+    "UP031",   # %-formatting in the renderer's hot paths; not worth the churn
+    "SIM105",  # contextlib.suppress reads worse than try/except pass in short handlers
+    "RUF005",  # [*a, b] is not clearer than a + [b] to most readers
+    # Its autofix expands a triple-quoted word list into one 4,000-character line. The
+    # Hinglish lexicon is meant to be read and extended by hand.
+    "SIM905",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests say what they mean; the engine's drawing code is dense on purpose.
+"tests/*" = ["B011", "SIM117", "RUF043", "E402", "E741"]
+# The version check is deliberately older than the declared floor: someone running from a
+# clone on 3.9 should be told so, not hit a syntax error.
+"creatoros_autopilot/cli/doctor.py" = ["UP036"]
+"creatoros_autopilot/render/engine.py" = ["E741", "E701", "E702", "RUF046"]
+# Small single-purpose utilities, run by hand, kept close to their original shape.
+"creatoros_autopilot/providers/tts/pick_voice.py" = ["E701", "E702", "SIM115", "E741"]
+# The three operational tools import a compatibility shim after a module constant, which
+# is the one place their import order cannot be top-of-file.
+"creatoros_autopilot/providers/publish/promote.py" = ["E402", "SIM115"]
+"creatoros_autopilot/providers/publish/promote_instagram.py" = ["E402"]
+"creatoros_autopilot/providers/publish/queue.py" = ["E402", "SIM115", "E741"]
+# The renderer is written as dense drawing code on purpose: one statement per visual
+# element, semicolons grouping a shape with its colour. 182 of these fire in this one file,
+# and reformatting it would be a large diff through the only code whose output is verified
+# pixel-for-pixel. The style is a deliberate choice here and nowhere else.
+
+[tool.mypy]
+python_version = "3.10"
+files = ["creatoros_autopilot"]
+exclude = "creatoros_autopilot/legacy"
+# Typing is being introduced gradually: the goal is that a contributor gets useful errors,
+# not that every line is annotated before anyone can commit. core/ and interfaces/ are the
+# parts worth being strict about, because everything else depends on their shapes.
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["creatoros_autopilot.render.*", "creatoros_autopilot.providers.*"]
+ignore_errors = true
