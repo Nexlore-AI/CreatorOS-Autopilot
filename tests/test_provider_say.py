@@ -94,6 +94,22 @@ def main(argv):
                 voice = value
             if arg == "-o":
                 out = value
+            if arg == "-f":
+                # The real `say` reads the narration from this file, and the backend uses
+                # that route for option-shaped lines because a leading hyphen breaks the
+                # binary even after `--`. The stub consumed the flag and ignored the file,
+                # so it answered "no message" for exactly the case under test.
+                try:
+                    message = open(value, encoding="utf-8").read()
+                except OSError:
+                    sys.stderr.write("say: could not read " + value + "\\n")
+                    return 1
+                if log:
+                    # Record what was actually spoken. The temporary file is deleted when
+                    # the process exits, so a test reading the argv afterwards would find
+                    # only a path that no longer resolves.
+                    with open(log, "a", encoding="utf-8") as handle:
+                        handle.write(json.dumps(argv + ["--", message]) + "\\n")
             index += 2
             continue
         if arg.startswith("--data-format="):
