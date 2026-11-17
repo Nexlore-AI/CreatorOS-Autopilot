@@ -103,7 +103,8 @@ class TestSecrets:
 
     def test_quotes_and_export_prefixes_are_handled(self, cfg, monkeypatch):
         (cfg / ".env").write_text('export A="quoted"\nB=\'single\'\n')
-        monkeypatch.delenv("A", raising=False); monkeypatch.delenv("B", raising=False)
+        monkeypatch.delenv("A", raising=False)
+        monkeypatch.delenv("B", raising=False)
         S.load_env(cfg)
         assert os.environ["A"] == "quoted" and os.environ["B"] == "single"
 

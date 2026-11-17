@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -189,7 +189,7 @@ class Settings:
 
 
 # --------------------------------------------------------------------------- loading
-def _build(cls, data: Any):
+def _build(cls: Any, data: Any) -> Any:
     """Construct a settings dataclass from plain YAML data, rejecting unknown keys.
 
     A typo in `creatoros.yaml` has to be an error. Silently ignoring `publsh:` would mean
@@ -198,6 +198,11 @@ def _build(cls, data: Any):
     """
     if not is_dataclass(cls):
         return data
+    # Past this point `cls` is a dataclass *type*, but `is_dataclass()` narrows only to
+    # "a dataclass or an instance of one", so mypy sees a union and objects to calling it
+    # or reading `__name__`. The behaviour is exercised by tests/test_settings.py; the
+    # alternative is restructuring working code around a checker limitation.
+    cls = cast(Any, cls)
     if data is None:
         return cls()
     if not isinstance(data, dict):

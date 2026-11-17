@@ -73,8 +73,8 @@ class TestDegradesRatherThanFails:
 
         (tmp_path / "k.yaml").write_text("name: No Logo Here\nlogo: gone.png\n")
         kit = brand_mod.load(str(tmp_path / "k.yaml"))
-        out = engine.run("preview", REPO / "examples" / "specs" / "kv-cache.json",
-                         str(tmp_path / "p.jpg"), kit=kit)
+        engine.run("preview", REPO / "examples" / "specs" / "kv-cache.json",
+                   str(tmp_path / "p.jpg"), kit=kit)
         assert (tmp_path / "p.jpg").stat().st_size > 10_000
 
     @needs_ffmpeg
@@ -179,7 +179,8 @@ class TestPresets:
 
     def test_a_single_language_preset_has_no_mix_to_gate(self):
         """The language gate skips itself rather than failing a correct configuration."""
-        from creatoros_autopilot.core import gates, settings as settings_mod
+        from creatoros_autopilot.core import gates
+        from creatoros_autopilot.core import settings as settings_mod
 
         settings = settings_mod.load(
             REPO / "examples" / "claro-es" / "creatoros.yaml", use_env=False)
@@ -188,7 +189,8 @@ class TestPresets:
         assert report.results == [] and report.ok
 
     def test_the_mixed_language_preset_measures_its_narration(self):
-        from creatoros_autopilot.core import gates, settings as settings_mod
+        from creatoros_autopilot.core import gates
+        from creatoros_autopilot.core import settings as settings_mod
 
         settings = settings_mod.load(
             REPO / "examples" / "nexlore-ai" / "creatoros.yaml", use_env=False)

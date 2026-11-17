@@ -1,5 +1,6 @@
-# Phase 1 CI: proves the acceptance criterion — a fresh clone renders on Linux, macOS and
-# Windows with no API keys. Linting, typing and secret scanning arrive in Phase 4.
+# What CI is for here: proving the acceptance criterion on every platform, and catching the
+# classes of mistake this project has actually made — a module nobody imports, a secret in
+# a config file, an OS-specific call outside runtime/.
 name: ci
 
 on:
@@ -7,7 +8,43 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  lint:
+    name: lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+      - name: ruff
+        run: ruff check .
+      - name: mypy
+        run: mypy
+      - name: secrets do not belong in config files
+        run: |
+          python scripts/check_no_secrets.py \
+            creatoros.example.yaml \
+            $(git ls-files 'examples/**/*.yaml' 'creatoros_autopilot/brands/*.yaml')
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs the history, not just the tip, or a key committed three
+          # commits ago and removed in the fourth goes unnoticed.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   test:
     name: ${{ matrix.os }} · python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
@@ -55,3 +92,13 @@ jobs:
         run: |
           ffprobe -v error -show_entries format=duration -of csv=p=0 kv-cache.mp4
           test -s kv-cache.mp4
+
+      - name: First-run path — init, doctor, render, from an empty directory
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/fresh" && cd "$RUNNER_TEMP/fresh"
+          creatoros init --yes
+          creatoros doctor
+          cp "$GITHUB_WORKSPACE/examples/specs/kv-cache.json" .
+          creatoros render kv-cache.json -o first.mp4
+          test -s first.mp4

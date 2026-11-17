@@ -52,8 +52,15 @@ from pathlib import Path
 
 from ...core import schedule as sched
 from ...interfaces.availability import Availability
-from ...interfaces.publish import (DRAFT, NOW, SCHEDULE, PlatformOutcome, PublishRequest,
-                                   PublishResult)
+from ...interfaces.publish import (
+    DRAFT,
+    NOW,
+    SCHEDULE,
+    PlatformOutcome,
+    PublishRequest,
+    PublishResult,
+)
+
 # Shared with the Zernio backend on purpose. A video must get the same title whichever
 # backend posts it, or the ledger records one title and the channel shows another.
 from .zernio import derive_tags, derive_title, load_spec

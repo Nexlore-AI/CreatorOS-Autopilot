@@ -14,7 +14,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .. import plugins
-from ..interfaces import GateResult
 
 
 @dataclass

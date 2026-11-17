@@ -36,7 +36,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from typing import Iterable, Iterator
+from collections.abc import Iterable, Iterator
 
 from ... import __version__
 from ...interfaces.availability import Availability

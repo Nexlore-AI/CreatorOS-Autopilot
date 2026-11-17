@@ -21,9 +21,10 @@ then renders.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import entry_points
-from typing import Any, Callable
+from typing import Any
 
 TTS, LLM, PUBLISH, RESEARCH, STYLE, GATE = "tts", "llm", "publish", "research", "style", "gate"
 GROUPS = {
@@ -65,7 +66,9 @@ def _discover(kind: str) -> dict[str, Found]:
             found[point.name] = Found(kind, point.name, point.load, point.value)
         _cache[kind] = dict(found)
     for name, factory in _manual[kind].items():
-        found[name] = Found(kind, name, lambda f=factory: f, "<registered>")
+        def _make(f=factory):
+            return f
+        found[name] = Found(kind, name, _make, "<registered>")
     return found
 
 

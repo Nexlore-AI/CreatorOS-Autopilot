@@ -23,7 +23,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import LINUX, MACOS, WINDOWS, os_name
+from . import MACOS, WINDOWS, os_name
 
 LABEL = "com.creatoros.autopilot"
 SERVICE = "creatoros-autopilot"

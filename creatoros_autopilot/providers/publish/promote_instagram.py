@@ -31,8 +31,7 @@ import time
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-from . import zernio as pz                       # spec + metadata helpers
-from ._api import LIMITS, ZernioAPI, ZernioError
+from ._api import ZernioAPI
 
 _api = ZernioAPI()
 
@@ -243,7 +242,7 @@ def main():
 
     print(f"{len(drafts)} draft(s) in Zernio -> {len(chosen)} unique reel(s) to publish, "
           f"{len(dropped)} duplicate(s) skipped, {len(done)} already on Instagram")
-    print(f"target: instagram only (the youtube target is dropped, not published)")
+    print("target: instagram only (the youtube target is dropped, not published)")
     print(f"pacing: {a.spacing}s between posts "
           f"(~{(len(chosen) - 1) * a.spacing // 60} min total)\n")
 

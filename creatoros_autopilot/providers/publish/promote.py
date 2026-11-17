@@ -22,8 +22,7 @@ import sys
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-from . import zernio as pz                       # spec + metadata helpers
-from ._api import LIMITS, ZernioAPI, ZernioError
+from ._api import ZernioAPI
 
 _api = ZernioAPI()
 
@@ -45,7 +44,8 @@ def ledger_rows():
     if not os.path.exists(LEDGER):
         return []
     out = []
-    for line in open(LEDGER):
+    with open(LEDGER, encoding="utf-8") as handle:
+      for line in handle:
         line = line.strip()
         if line:
             try:
@@ -87,16 +87,16 @@ def main():
         print("-" * 92)
         for pid, files in seen.items():
             p = get_post(key, pid) or {}
-            print(f"{pid:<26} {str(p.get('status')):<10} {', '.join(sorted(files))[:54]}")
+            print(f"{pid:<26} {p.get('status')!s:<10} {', '.join(sorted(files))[:54]}")
         return 0
 
     targets = list(dict.fromkeys(a.post))
     if a.dir:
         want = os.path.relpath(os.path.abspath(a.dir), HERE)
         for r in rows:
-            if r.get("postId") and str(r.get("file", "")).startswith(want + os.sep):
-                if r["postId"] not in targets:
-                    targets.append(r["postId"])
+            if (r.get("postId") and str(r.get("file", "")).startswith(want + os.sep)
+                    and r["postId"] not in targets):
+                targets.append(r["postId"])
     if not targets:
         sys.exit("nothing selected: pass --dir and/or --post (or --list to see what exists)")
 

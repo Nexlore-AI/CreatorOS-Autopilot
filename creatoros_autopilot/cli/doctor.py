@@ -15,12 +15,12 @@ No check prints a secret. A key is reported as present or missing by name only.
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 from dataclasses import dataclass
 
 from .. import plugins
-from ..core import media, settings as settings_mod
+from ..core import media
+from ..core import settings as settings_mod
 from ..core.schedule import zone
 from ..runtime import os_name
 

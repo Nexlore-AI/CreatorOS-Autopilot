@@ -55,7 +55,7 @@ def spec_hook(spec: dict) -> str:
 def derive_title(caption: str, fallback: str, spec: dict | None = None) -> str:
     """Prefer the spec's hook, else the caption's first line. <=100 chars, on a word."""
     first = (spec_hook(spec or {}) or
-             next((l.strip() for l in caption.splitlines() if l.strip()), "") or
+             next((line.strip() for line in caption.splitlines() if line.strip()), "") or
              fallback)
     first = re.sub(r"#\S+", "", first).strip(" .,-—")
     cap = LIMITS["youtube"]["title"]

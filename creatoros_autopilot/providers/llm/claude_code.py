@@ -17,7 +17,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from pathlib import Path
 
 from ...agents import DEFAULT_PROMPT, prompt_text
 from ...interfaces import Availability

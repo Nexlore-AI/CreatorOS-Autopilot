@@ -31,7 +31,7 @@ class Lock:
         self.stale_after = stale_after
         self.held = False
 
-    def acquire(self) -> "Lock":
+    def acquire(self) -> Lock:
         self._clear_if_stale()
         try:
             self.path.mkdir(parents=True)
@@ -65,7 +65,7 @@ class Lock:
             except OSError:
                 pass
 
-    def __enter__(self) -> "Lock":
+    def __enter__(self) -> Lock:
         return self.acquire()
 
     def __exit__(self, *exc) -> None:

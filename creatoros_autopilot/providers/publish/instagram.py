@@ -72,8 +72,14 @@ import urllib.request
 from pathlib import Path
 
 from ...interfaces.availability import Availability
-from ...interfaces.publish import (DRAFT, NOW, SCHEDULE, PlatformOutcome, PublishRequest,
-                                   PublishResult)
+from ...interfaces.publish import (
+    DRAFT,
+    NOW,
+    SCHEDULE,
+    PlatformOutcome,
+    PublishRequest,
+    PublishResult,
+)
 
 HOST = "https://graph.facebook.com"
 # Pinned, because a Graph version reaching end of life changes behaviour under you. The

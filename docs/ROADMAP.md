@@ -1,6 +1,6 @@
 # CreatorOS Autopilot — Roadmap
 
-**Status:** Phases 1–3 complete (PRs #2, #3, #4). Phase 0's audit stands as written below; findings
+**Status:** Phases 1–4 complete (PRs #2, #3, #4, #5). Phase 0's audit stands as written below; findings
 it fixed are marked ✅. The four decisions in §6 were answered on
 2026-11-17 and are recorded there. Phases 1–7 are proposed, not started.
 
@@ -403,19 +403,49 @@ The budget was ten minutes.
 The second is the more interesting one: it was invisible locally because the parent process
 never unpickles, and it would have appeared only under the multiprocessing render.
 
-### Phase 4 — Contributor experience
-- pytest: spec validation, ledger idempotency (including the double-post regression),
-  slot/timezone arithmetic, mocked providers, and a render smoke test on a 2-scene spec.
-- ruff, mypy, pre-commit.
-- GitHub Actions on ubuntu/macos/windows; gitleaks on every PR.
-- `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, issue and PR templates,
-  `CODEOWNERS` (@amasick).
-- `docs/plugins/first-plugin.md` and `docs/plugins/add-a-style.md`.
-- 15–20 scoped `good first issue` / `help wanted` drafts in `docs/seed-issues/`: new TTS
-  voices and providers, TikTok and LinkedIn publishers, new styles, translations of the
-  example presets, Windows polish, research sources.
+### Phase 4 — Contributor experience ✅
 
-**Acceptance:** CI green on three OSes; `pytest` under 60 s locally; gitleaks clean.
+*Landed. Closes E-26.*
+
+- [x] pytest: spec validation, ledger idempotency (including the double-post regression),
+  slot/timezone arithmetic, mocked providers, and a render smoke test on a 2-scene spec.
+- [x] ruff, mypy, pre-commit — both clean on 64 files. ruff's first run found 403 issues
+  and **242 were noise**: 182 in `render/engine.py`, written as dense drawing code on
+  purpose and the only code whose output is verified pixel-for-pixel, and ~60 in the
+  vendored MIT skill scripts, which are not ours to reformat. Both are excluded with the
+  reasoning in the config. One autofix was reverted: it expanded the Hinglish lexicon from
+  a readable word list into a single 4,000-character line.
+- [x] CI grows a lint job, a types job and gitleaks over the **full history** — a key
+  committed three commits ago and removed in the fourth is what a shallow scan misses. The
+  matrix also runs the first-run path end to end from an empty directory.
+- [x] `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `SECURITY.md`,
+  three issue templates, a PR template and `CODEOWNERS`.
+- [x] `scripts/check_no_secrets.py`: a pre-commit hook that rejects a key-shaped value in
+  any committed config file, which is what makes "settings in YAML, secrets in .env"
+  enforceable rather than a convention.
+- [x] `docs/plugins/first-plugin.md` and `docs/plugins/add-a-style.md`.
+- [x] **18 drafts** in `docs/seed-issues/` — 10 `good first issue`, 8 `help wanted`. Every
+  file path and function name in them was checked against the tree; where something depends
+  on a third-party API that could not be verified, the issue says "check whether…" rather
+  than asserting it.
+
+**Acceptance — met, except the time budget.**
+
+| | |
+|---|---|
+| ruff, mypy | clean, 64 files |
+| gitleaks | clean over the full history |
+| CI | lint + types + secrets + six-way OS matrix + the first-run path |
+| `pytest` | **~2 minutes**, not the 60 s in the plan |
+
+The suite is slower than planned because it renders real video: seven full MP4 encodes and
+a dozen contact sheets, which is also why it catches what it catches. Splitting it so
+`pytest -m "not render"` runs in seconds is worth doing and is not done — it is the one
+Phase 4 item carried forward.
+
+It was briefly **nine minutes**, from two bugs introduced in Phase 3 and caught here. Both
+are written up in that phase; the second is the one worth remembering, because it would
+only ever have appeared under the multiprocessing render.
 
 ### Phase 5 — Launch-ready README and assets
 - Rewrite the README to the brief's structure: pitch, demo, 3-command quickstart, features,

@@ -26,9 +26,9 @@ class Availability:
         return self.ok
 
     @classmethod
-    def yes(cls, detail: str = "") -> "Availability":
+    def yes(cls, detail: str = "") -> Availability:
         return cls(True, detail)
 
     @classmethod
-    def no(cls, detail: str, fix: str = "") -> "Availability":
+    def no(cls, detail: str, fix: str = "") -> Availability:
         return cls(False, detail, fix)

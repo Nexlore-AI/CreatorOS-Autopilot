@@ -27,7 +27,15 @@ rebuild (which installs only pillow + numpy) can never break it.
 
 Docs: https://zernio.com/agent-quickstart.md and https://zernio.com/llms.txt
 """
-import argparse, datetime, json, mimetypes, os, re, sys, urllib.error, urllib.request
+import argparse
+import datetime
+import json
+import mimetypes
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
 
 API_BASE = os.environ.get("ZERNIO_API_BASE", "https://zernio.com/api/v1").rstrip("/")
 TZ_NAME = os.environ.get("POST_TZ", "Asia/Kolkata")
@@ -92,7 +100,7 @@ def pick_accounts(wanted=None):
     """Active accounts, optionally limited to a comma list of platform names."""
     accts = [a for a in list_accounts() if a.get("isActive", True)]
     if wanted:
-        want = set(w.strip().lower() for w in wanted.split(",") if w.strip())
+        want = {w.strip().lower() for w in wanted.split(",") if w.strip()}
         accts = [a for a in accts if str(a.get("platform", "")).lower() in want]
     return accts
 
@@ -259,7 +267,7 @@ def cmd_post(args):
     res = api("POST", "/posts", body)
     post = res.get("post") or res
     pid = post.get("_id") or post.get("id") or ""
-    where = ", ".join(sorted(set(str(a.get("platform")) for a in accts)))
+    where = ", ".join(sorted({str(a.get("platform")) for a in accts}))
     when = body.get("scheduledFor", "now" if mode == "publish" else "draft")
     print("%s -> zernio:%s  id=%s  platforms=%s  when=%s" % (os.path.basename(video), mode, pid, where, when))
     record(video, mode, pid, True)

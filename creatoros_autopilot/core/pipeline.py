@@ -14,7 +14,6 @@ what lets the same code run later inside a server worker.
 from __future__ import annotations
 
 import datetime as dt
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -63,7 +62,7 @@ def rendered_videos(job_dir: Path) -> list[tuple[int, Path]]:
     `*_scenes` holds the per-scene intermediates the renderer concatenates, so it is
     excluded; an unfinished render leaves those behind and they are not publishable.
     """
-    out = []
+    out: list[tuple[int, Path]] = []
     if not job_dir.is_dir():
         return out
     for path in sorted(job_dir.glob("*.mp4")):
@@ -110,7 +109,9 @@ def _publish_via(routes: dict, video, job_id: str, pending: list[str], decision,
         except Exception:
             spec = {}
 
-    outcomes, ok, post_id, practice = [], True, "", set()
+    outcomes: list = []
+    practice: set = set()
+    ok, post_id = True, ""
     for backend, owned in routes.values():
         mine = [p for p in pending if p in owned]
         if not mine:
@@ -243,7 +244,7 @@ def publish_day(settings: Settings, date: str, *, dry_run: bool = False,
             # fails inside it (HTTP 207). Recording a blanket result would then either
             # lose a real failure or re-post a platform that already succeeded, so each
             # platform's row is written from its own status.
-            practice = getattr(res, "practice", set())
+            practice: set = getattr(res, "practice", set())
             ok_by_platform = {p: res.ok_for(p) for p in pending}
             item.ok = bool(res.ok) and all(ok_by_platform.values())
             item.platforms = [p for p, ok in ok_by_platform.items() if ok]
