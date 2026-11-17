@@ -32,19 +32,32 @@ def _settings(args):
 
 
 # ------------------------------------------------------------------- commands
-def cmd_render(args) -> int:
-    from ..render import engine
+def _style_and_brand(settings):
+    from .. import plugins
+    from ..core import brand as brand_mod
 
-    _settings(args)
-    engine.run("render", args.spec, args.out)
+    style = plugins.load(plugins.STYLE, settings.style)
+    kit = brand_mod.load(settings.brand_path)
+    return style, kit
+
+
+def cmd_render(args) -> int:
+    from ..core import spec as spec_mod
+
+    settings = _settings(args)
+    style, kit = _style_and_brand(settings)
+    style.render(spec_mod.load(args.spec), Path(args.spec),
+                 Path(args.out) if args.out else None, brand=kit)
     return 0
 
 
 def cmd_preview(args) -> int:
-    from ..render import engine
+    from ..core import spec as spec_mod
 
-    _settings(args)
-    engine.run("preview", args.spec, args.out)
+    settings = _settings(args)
+    style, kit = _style_and_brand(settings)
+    style.preview(spec_mod.load(args.spec), Path(args.spec),
+                  Path(args.out) if args.out else None, brand=kit)
     return 0
 
 
@@ -164,6 +177,36 @@ def cmd_status(args) -> int:
     return 0
 
 
+def cmd_init(args) -> int:
+    from . import init_wizard
+
+    console = init_wizard.Console(assume=args.yes)
+    return init_wizard.run(console, Path(args.directory or Path.cwd()),
+                           force=args.force, preset=args.preset or "")
+
+
+def cmd_brands(args) -> int:
+    from ..core import brand as brand_mod
+
+    names = brand_mod.available()
+    if not names:
+        print("no brand kits found. They are YAML files in ./brands/ or your config "
+              "directory; some ship with CreatorOS.")
+        return 0
+    settings = _settings(args)
+    for name in names:
+        try:
+            kit = brand_mod.load(name)
+        except brand_mod.BrandError as exc:
+            print(f"  x {name}: {exc}")
+            continue
+        mark = "*" if name == settings.brand else " "
+        print(f"{mark} {name:18s} {kit.name}"
+              + (f" — {kit.tagline}" if kit.tagline else "")
+              + ("" if kit.logo else "  (wordmark, no logo)"))
+    return 0
+
+
 def cmd_doctor(args) -> int:
     from . import doctor
 
@@ -243,6 +286,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_p = sub.add_parser("doctor", help="check dependencies, config, keys and accounts")
     doctor_p.set_defaults(func=cmd_doctor)
+
+    init_p = sub.add_parser("init", help="set up creatoros.yaml and .env")
+    init_p.add_argument("directory", nargs="?", help="where to write (default: here)")
+    init_p.add_argument("--yes", action="store_true",
+                        help="take every default; never prompt")
+    init_p.add_argument("--force", action="store_true", help="replace an existing config")
+    init_p.add_argument("--preset", help="start from a shipped preset")
+    init_p.set_defaults(func=cmd_init)
+
+    brands_p = sub.add_parser("brands", help="list the brand kits that are available")
+    brands_p.set_defaults(func=cmd_brands)
 
     schedule = sub.add_parser("schedule", help="install the daily job (launchd/systemd/schtasks)")
     schedule.add_argument("action", choices=["show", "install", "remove"], nargs="?", default="show")

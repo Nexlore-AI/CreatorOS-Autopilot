@@ -204,8 +204,22 @@ def _agent(settings) -> list[Check]:
     return out
 
 
-def _style(settings) -> Check:
-    return _plugin(plugins.STYLE, settings.style, "style")
+def _style(settings) -> list[Check]:
+    from ..core import brand as brand_mod
+
+    out = [_plugin(plugins.STYLE, settings.style, "style")]
+    try:
+        kit = brand_mod.load(settings.brand_path)
+    except brand_mod.BrandError as exc:
+        out.append(Check("brand", FAIL, str(exc).split(".")[0],
+                         f"available: {', '.join(brand_mod.available()) or '(none)'}",
+                         required=False))
+        return out
+    detail = f"{kit.name} ({kit.source})"
+    if not kit.logo:
+        detail += " · no logo, rendering the wordmark"
+    out.append(Check("brand", OK, detail, required=False))
+    return out
 
 
 def _gates(settings) -> list[Check]:
@@ -231,7 +245,7 @@ def collect(settings=None, source: str = "") -> list[Check]:
         source = settings_mod.source_of(settings)
     checks = [_python(), *_imports(), *_ffmpeg(), _package_data()]
     checks += _config(settings, source or settings_mod.source_of(settings))
-    checks.append(_style(settings))
+    checks += _style(settings)
     checks += _narration(settings)
     checks += _publishing(settings)
     checks += _agent(settings)
