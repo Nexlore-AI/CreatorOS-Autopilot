@@ -33,13 +33,28 @@ class LanguageMix:
     name = "langmix"
     advisory = False
 
-    def __init__(self, lexicon: set[str] | None = None, prefer: dict | None = None,
+    def __init__(self, lexicon=None, prefer: dict | None = None,
                  low: float = 0.38, high: float = 0.55):
-        # Defaults are the Nexlore Hinglish lexicon. Phase 3 moves these into brand data,
-        # which is why they are constructor arguments rather than module constants.
         self.lexicon = set(lexicon) if lexicon is not None else set(ENGLISH)
         self.prefer = dict(prefer) if prefer is not None else dict(PREFER_ENGLISH)
         self.low, self.high = low, high
+
+    @classmethod
+    def from_brand(cls, kit) -> "LanguageMix | None":
+        """Build the gate from a brand's `language` block, or None if it has no mix.
+
+        This is what makes Hinglish a setting rather than a fact about the pipeline. The
+        band used to be two module constants and the lexicon a literal set; a channel that
+        mixed Spanish into Portuguese, or did not mix at all, had no way through. A brand
+        with no `secondary` or no `ratio` disables the gate entirely, which is the right
+        answer for a single-language channel rather than a check it always fails.
+        """
+        language = getattr(kit, "language", None)
+        if not language or not language.secondary or language.ratio is None:
+            return None
+        return cls(lexicon=set(language.lexicon) or None,
+                   low=max(0.0, language.ratio - language.tolerance),
+                   high=min(1.0, language.ratio + language.tolerance))
 
     def analyse(self, lines: list[str]) -> tuple[list[str], list[str], list[tuple[str, str]]]:
         words, secondary, flagged = [], [], []

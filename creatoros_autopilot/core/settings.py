@@ -35,6 +35,12 @@ CONFIG_NAME = "creatoros.yaml"
 class ContentSettings:
     videos_per_day: int = 1
     run_at: str = "06:30"
+    #: Pillar names to run. Empty means "every pillar in `pillars_dir`", which is the
+    #: useful default for a channel whose directory holds exactly what it publishes.
+    pillars: list[str] = field(default_factory=list)
+    #: Where pillar files live. Relative paths resolve against the config file, so a
+    #: preset directory is self-contained and can be copied anywhere.
+    pillars_dir: str = "pillars"
 
 
 @dataclass
@@ -92,6 +98,9 @@ class Settings:
     workspace: str = ""              # empty = the platform's data directory
     timezone: str = "UTC"
     style: str = "nexlore-v3"
+    #: A brand kit name or path. Empty is the neutral built-in look, which is a default
+    #: rather than anyone's identity.
+    brand: str = ""
     content: ContentSettings = field(default_factory=ContentSettings)
     agent: AgentSettings = field(default_factory=AgentSettings)
     tts: TTSSettings = field(default_factory=TTSSettings)
@@ -134,6 +143,45 @@ class Settings:
 
     def job_dir(self, date: str) -> Path:
         return self.jobs_dir / date
+
+    @property
+    def config_dir(self) -> Path:
+        """Where the config file lives, or the working directory if there is none.
+
+        Relative paths in `creatoros.yaml` resolve against this rather than against the
+        process's working directory, so a preset folder — config, brand and pillars — can
+        be copied anywhere and still work, and a scheduled run does not depend on where it
+        happens to start.
+        """
+        source = self.__dict__.get("_source")
+        return Path(source).parent if source else Path.cwd()
+
+    def _relative(self, raw: str) -> Path:
+        path = Path(raw).expanduser()
+        return path if path.is_absolute() else self.config_dir / path
+
+    @property
+    def pillars_dir(self) -> Path:
+        return self._relative(self.content.pillars_dir)
+
+    @property
+    def brand_path(self) -> str:
+        """The brand as the loader wants it: a name, or a path resolved against the config.
+
+        A preset says `brand: brand.yaml` and means the file beside it. A user says
+        `brand: nexlore-ai` and means the kit by name. Both work, and which one it is is
+        decided by whether it looks like a file.
+        """
+        raw = (self.brand or "").strip()
+        if not raw:
+            return ""
+        if raw.endswith((".yaml", ".yml")):
+            return str(self._relative(raw))
+        return raw
+
+    def pillars(self) -> list:
+        from . import pillars as pillars_mod
+        return pillars_mod.load_all(self.pillars_dir)
 
     def ensure_dirs(self) -> None:
         for path in (self.workspace_dir, self.jobs_dir, self.music_dir, self.logs_dir):
@@ -196,8 +244,10 @@ ENV_OVERRIDES = {
     "CREATOROS_WORKSPACE": ("workspace",),
     "CREATOROS_TIMEZONE": ("timezone",),
     "CREATOROS_STYLE": ("style",),
+    "CREATOROS_BRAND": ("brand",),
     "CREATOROS_VIDEOS_PER_DAY": ("content", "videos_per_day"),
     "CREATOROS_RUN_AT": ("content", "run_at"),
+    "CREATOROS_PILLARS": ("content", "pillars"),
     "CREATOROS_AGENT_PROVIDER": ("agent", "provider"),
     "CREATOROS_AGENT_MAX_TURNS": ("agent", "max_turns"),
     "CREATOROS_TTS_BACKEND": ("tts", "backend"),

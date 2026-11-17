@@ -17,6 +17,9 @@ class GateResult:
     messages: list[str] = field(default_factory=list)
     #: Per-scene detail, when the gate has it — `{scene_index: "what is wrong"}`.
     detail: dict = field(default_factory=dict)
+    #: Set by the gate runner from the gate's own `advisory` flag, so a caller holding
+    #: only results can still tell a warning from a failure.
+    advisory: bool = False
 
     def summary(self) -> str:
         head = f"{self.gate}: {'pass' if self.ok else 'FAIL'}"
