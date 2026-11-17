@@ -208,6 +208,12 @@ def cmd_brands(args) -> int:
     return 0
 
 
+def cmd_migrate_ledger(args) -> int:
+    from . import migrate
+
+    return migrate.run(args, _settings(args))
+
+
 def cmd_doctor(args) -> int:
     from . import doctor
 
@@ -298,6 +304,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     brands_p = sub.add_parser("brands", help="list the brand kits that are available")
     brands_p.set_defaults(func=cmd_brands)
+
+    migrate_p = sub.add_parser(
+        "migrate-ledger",
+        help="import an old pipeline's publish record (dry run unless --write)")
+    migrate_p.add_argument("source", nargs="?",
+                           help="folder holding the old ledger (default: here)")
+    migrate_p.add_argument("--roots", nargs="*",
+                           help="folders to search for the videos' spec files")
+    migrate_p.add_argument("--assume-platforms",
+                           help="platforms for old rows that recorded none "
+                                "(default: publish.platforms)")
+    migrate_p.add_argument("--write", action="store_true", help="actually write")
+    migrate_p.add_argument("--force", action="store_true",
+                           help="write even with unresolved rows")
+    migrate_p.set_defaults(func=cmd_migrate_ledger)
 
     schedule = sub.add_parser("schedule", help="install the daily job (launchd/systemd/schtasks)")
     schedule.add_argument("action", choices=["show", "install", "remove"], nargs="?", default="show")

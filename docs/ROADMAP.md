@@ -1,7 +1,7 @@
 # CreatorOS Autopilot — Roadmap
 
-**Status:** Phases 1–5 complete (PRs #2–#6). Phase 6 (migrate the channel) needs Aman at
-the keyboard; Phase 7 is a document. Phase 0's audit stands as written below; findings
+**Status:** Phases 1–6 complete (PRs #2–#7); the Phase 6 cutover itself needs Aman at the
+keyboard and has not been performed. Phase 7 is a document. Phase 0's audit stands as written below; findings
 it fixed are marked ✅. The four decisions in §6 were answered on
 2026-11-17 and are recorded there. Phases 1–7 are proposed, not started.
 
@@ -473,10 +473,32 @@ Checking `history.jsonl` and the ledger: **49 videos across 8 publishing days, 2
 every number in a draft must be checkable — a launch post with one disprovable figure is
 worse than no launch post.
 
-### Phase 6 — Migrate the channel
-Per §4. **Acceptance:** one full day rendered and published through the new CLI, matching
-the old pipeline's output; the ledger shows no duplicates; the launchd job calls `creatoros`;
-old scripts deleted only on your confirmation.
+### Phase 6 — Migrate the channel ✅ *(rehearsed; the cutover is Aman's to run)*
+
+- [x] `creatoros migrate-ledger`, which imports both old ledgers and re-keys them onto job
+  ids. Dry run by default; refuses to write with unresolved rows.
+- [x] Rehearsed against a **copy** of the real data: 94 rows to import, 35 already recorded,
+  2 bookkeeping markers skipped, **0 unresolved**.
+- [x] Dry-ran two real days. A fully published day posts nothing; a partly published day
+  skips the video that went out and retries only the one that did not.
+- [x] `docs/MIGRATION.md`: nine steps, each reversible, with the rollback for the one that
+  feels like it is not.
+- [ ] The cutover. **Not done, and not mine to do** — the launchd job still runs
+  `shorts/run_shorts.sh` and no old script has been deleted.
+
+**The rehearsal found a bug in the migration itself.** The first version reported 79 rows
+imported while the ledger rejected 15 of them: the oldest shell-ledger rows recorded *that*
+a video published but not *where*, and an entry with no platform is refused. Fifteen
+already-published videos would have looked unpublished, and the next run would have posted
+them again — the exact failure the command exists to prevent, in the command that exists to
+prevent it. It now fills those in from `publish.platforms`, reports how many it assumed, and
+fails loudly if what it wrote differs from what it planned.
+
+**Two things it surfaced about the channel's own data**, both written up in `MIGRATION.md`:
+the 2026-11-16 specs carry no `platforms.instagram.caption`, which is why
+`01_guidance-scale` failed to publish that day and still fails a dry run; and the reels-era
+and shorts-era ledgers use different job-id conventions, which import cleanly but will not
+match if an old reel is ever re-rendered.
 
 ### Phase 7 — Hosted platform readiness *(design only)*
 `docs/HOSTED_ARCHITECTURE.md`: API service, job queue, render workers (GPU optional), object
