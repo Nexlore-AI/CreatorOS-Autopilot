@@ -44,26 +44,41 @@ class TestRenderValidation:
                 sp.validate_render(bad)
 
 
+def _requires(platform):
+    """Stands in for a publisher's requires(). Core holds no such table any more."""
+    return {"youtube": ("title", "description", "tags"),
+            "instagram": ("caption",)}.get(platform, ())
+
+
 class TestPublishValidation:
     def test_youtube_needs_title_description_tags(self):
         with pytest.raises(sp.SpecError) as exc:
-            sp.validate_publish(MINIMAL, ["youtube"])
+            sp.validate_publish(MINIMAL, ["youtube"], requires=_requires)
         assert len(exc.value.problems) == 3
 
     def test_instagram_needs_a_caption(self):
         """An Instagram Reel with no caption gets no reach and cannot be found."""
         spec = dict(MINIMAL, platforms={"instagram": {"caption": "  "}})
         with pytest.raises(sp.SpecError, match="caption"):
-            sp.validate_publish(spec, ["instagram"])
+            sp.validate_publish(spec, ["instagram"], requires=_requires)
+
+    def test_requirements_come_from_the_publisher_not_from_core(self):
+        """With no publisher to ask, core checks only what it owns: the ledger identity."""
+        assert sp.validate_publish(MINIMAL, ["youtube"]) == []
+
+    def test_a_new_platform_needs_no_core_change(self):
+        spec = dict(MINIMAL, platforms={"tiktok": {}})
+        with pytest.raises(sp.SpecError, match="tiktok.caption"):
+            sp.validate_publish(spec, ["tiktok"], requires=lambda p: ("caption",))
 
     def test_only_the_requested_platforms_are_checked(self):
         spec = dict(MINIMAL, platforms={"instagram": {"caption": "hello"}})
-        assert sp.validate_publish(spec, ["instagram"]) == []
+        assert sp.validate_publish(spec, ["instagram"], requires=_requires) == []
 
     def test_publishing_needs_an_id_for_the_ledger(self):
         spec = {"scenes": MINIMAL["scenes"], "platforms": {"instagram": {"caption": "x"}}}
         with pytest.raises(sp.SpecError, match="id"):
-            sp.validate_publish(spec, ["instagram"])
+            sp.validate_publish(spec, ["instagram"], requires=_requires)
 
 
 class TestHelpers:

@@ -51,6 +51,36 @@ Issues = "https://github.com/Nexlore-AI/CreatorOS-Autopilot/issues"
 [project.scripts]
 creatoros = "creatoros_autopilot.cli.main:main"
 
+# Every provider CreatorOS ships registers through the same public entry points a
+# third-party plugin would use. There is no built-in table consulted first and no
+# `if name == "elevenlabs"` anywhere in core/ — a mechanism only its authors use is a
+# mechanism that quietly stops working.
+[project.entry-points."creatoros.tts"]
+elevenlabs = "creatoros_autopilot.providers.tts.elevenlabs:ElevenLabs"
+piper = "creatoros_autopilot.providers.tts.piper:Piper"
+say = "creatoros_autopilot.providers.tts.say:Say"
+
+[project.entry-points."creatoros.llm"]
+claude_code = "creatoros_autopilot.providers.llm.claude_code:ClaudeCode"
+ollama = "creatoros_autopilot.providers.llm.ollama:Ollama"
+
+[project.entry-points."creatoros.publish"]
+zernio = "creatoros_autopilot.providers.publish.zernio:Zernio"
+youtube = "creatoros_autopilot.providers.publish.youtube:YouTube"
+instagram = "creatoros_autopilot.providers.publish.instagram:Instagram"
+local_folder = "creatoros_autopilot.providers.publish.local_folder:LocalFolder"
+
+[project.entry-points."creatoros.research"]
+rss = "creatoros_autopilot.providers.research.rss:RSS"
+arxiv = "creatoros_autopilot.providers.research.arxiv:ArXiv"
+huggingface_papers = "creatoros_autopilot.providers.research.huggingface_papers:HuggingFacePapers"
+
+[project.entry-points."creatoros.style"]
+nexlore-v3 = "creatoros_autopilot.providers.style.nexlore_v3:NexloreV3"
+
+[project.entry-points."creatoros.gate"]
+langmix = "creatoros_autopilot.providers.gate.langmix:LanguageMix"
+
 [tool.setuptools.packages.find]
 include = ["creatoros_autopilot*"]
 

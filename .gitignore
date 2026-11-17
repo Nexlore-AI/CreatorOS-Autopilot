@@ -17,6 +17,11 @@ logs/
 *.jsonl
 !examples/**/*.jsonl
 
+# ---- Voice models: ~60 MB each, downloaded by the user ----
+piper-voices/
+*.onnx
+*.onnx.json
+
 # ---- Media: user content, and too big for git ----
 *.mp3
 *.wav

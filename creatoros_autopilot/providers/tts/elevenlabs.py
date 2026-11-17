@@ -1,166 +1,162 @@
-#!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Narration and music through ElevenLabs.
+"""ElevenLabs narration.
 
-One clip per scene into `<spec>_vo/NN.mp3`, plus a music bed. A clip is only regenerated
-when its line changed — the hashes live in `<spec>_vo/manifest.json` — which is what keeps
-a re-render from re-billing the whole video.
+This backend is now only what a TTS backend should be: one line in, one audio file out.
+Everything it used to also own — walking the scenes, hashing each line so an unchanged one
+is not re-billed, deleting clips for scenes that were removed, choosing a music bed — moved
+to `core.narrate` and `core.music`, where every backend gets it. That caching is the reason
+a re-render does not cost money, and it should never have belonged to one vendor.
 
-This is still the only TTS backend that the daily pipeline uses. Phase 2 puts it behind a
-`TTS` interface alongside Piper, which is what makes the free local path real; until then
-`tts.backend: none` is the keyless default and renders scenes at their minimum duration.
-
-Keys come from the environment (`ELEVENLABS_API_KEY`), never from `creatoros.yaml`.
+It is a paid backend, so `paid = True`: `creatoros doctor` warns, and the test suite refuses
+to call it. Free local narration is `piper`.
 """
 from __future__ import annotations
 
-import glob
-import hashlib
 import json
 import os
-import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-from ...core import spec as spec_mod
+from ...interfaces import Availability, Voice
 
 API = "https://api.elevenlabs.io/v1"
 DEFAULT_MODEL = "eleven_multilingual_v2"
-SETTINGS = {"stability": 0.45, "similarity_boost": 0.8, "style": 0.25, "use_speaker_boost": True}
+# Tuned for explainer narration: enough stability to stay level across a 60-second script,
+# enough style to not sound flat.
+VOICE_SETTINGS = {"stability": 0.45, "similarity_boost": 0.8, "style": 0.25,
+                  "use_speaker_boost": True}
 
 
-class TTSError(RuntimeError):
+class ElevenLabsError(RuntimeError):
     pass
 
 
-def _post(url: str, body: dict, out: str, key: str) -> str | None:
-    """POST expecting audio back. Returns an error string, or None on success."""
-    req = urllib.request.Request(
-        url, data=json.dumps(body).encode(), method="POST",
-        headers={"xi-api-key": key, "Content-Type": "application/json", "Accept": "audio/mpeg"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=300) as resp, open(out + ".part", "wb") as fh:
-            fh.write(resp.read())
-        os.replace(out + ".part", out)
-        return None
-    except urllib.error.HTTPError as exc:
-        return f"HTTP {exc.code} {exc.read()[:300].decode(errors='replace')}"
-    except Exception as exc:
-        return str(exc)
-    finally:
-        # A half-written .part would otherwise be mistaken for nothing at all next run.
-        if os.path.exists(out + ".part"):
-            os.remove(out + ".part")
+class ElevenLabs:
+    name = "elevenlabs"
+    paid = True
 
+    def __init__(self, api_key: str | None = None, key_env: str = "ELEVENLABS_API_KEY",
+                 model: str = DEFAULT_MODEL):
+        self._key = (api_key or "").strip()
+        self.key_env = key_env
+        self.model = model
 
-def narrate(spec_path: str | os.PathLike, *, voice_id: str = "", model: str = "",
-            api_key: str = "") -> tuple[dict, list[str]]:
-    """Voice every scene that changed. Returns (spec, problems)."""
-    spec_path = str(Path(spec_path).resolve())
-    spec = spec_mod.load(spec_path)
-    key = (api_key or os.environ.get("ELEVENLABS_API_KEY", "")).strip()
-    if not key:
-        raise TTSError(
-            "ELEVENLABS_API_KEY is not set. Put it in .env beside creatoros.yaml, or set "
-            "tts.backend: none to render without narration."
-        )
-    voice = (voice_id or os.environ.get("CREATOROS_TTS_VOICE_ID", "")).strip()
-    if not voice:
-        raise TTSError("no voice id: set tts.voice_id in creatoros.yaml")
-    model = model or DEFAULT_MODEL
+    # ------------------------------------------------------------------ auth
+    @property
+    def key(self) -> str:
+        key = self._key or os.environ.get(self.key_env, "").strip()
+        if not key:
+            raise ElevenLabsError(f"{self.key_env} is not set")
+        return key
 
-    out_dir = spec_mod.vo_dir(spec_path)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = out_dir / "manifest.json"
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
+    def _has_key(self) -> bool:
+        return bool(self._key or os.environ.get(self.key_env, "").strip())
 
-    problems = []
-    scenes = spec.get("scenes") or []
-    for i, scene in enumerate(scenes, 1):
-        line = (scene.get("voice") or "").strip()
-        if not line:
-            problems.append(f"scene {i}: no voice line")
-            continue
-        target = out_dir / f"{i:02d}.mp3"
-        digest = hashlib.sha1((voice + model + line).encode()).hexdigest()[:16]
-        if target.exists() and manifest.get(f"{i:02d}") == digest:
-            print(f"voice {i:02d} unchanged")
-            continue
-        err = _post(f"{API}/text-to-speech/{voice}?output_format=mp3_44100_128",
-                    {"text": line, "model_id": model, "voice_settings": SETTINGS},
-                    str(target), key)
-        if err:
-            problems.append(f"scene {i}: {err}")
-            continue
-        manifest[f"{i:02d}"] = digest
-        print(f"voice {i:02d} ok")
+    def _get(self, path: str) -> dict:
+        req = urllib.request.Request(f"{API}{path}", headers={"xi-api-key": self.key})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read())
 
-    for stale in out_dir.glob("*.mp3"):            # scenes that were removed
-        num = stale.name[:2]
-        if num.isdigit() and int(num) > len(scenes):
-            stale.unlink()
-            manifest.pop(num, None)
-    manifest_path.write_text(json.dumps(manifest, indent=1))
-    return spec, problems
+    # -------------------------------------------------------------- protocol
+    def available(self) -> Availability:
+        if not self._has_key():
+            return Availability.no(
+                f"{self.key_env} is not set",
+                f"add {self.key_env} to .env, or set tts.backend: piper for a free local voice",
+            )
+        try:
+            user = self._get("/user/subscription")
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403):
+                return Availability.no("the key was rejected", "check the key in .env")
+            return Availability.no(f"HTTP {exc.code}", "check https://status.elevenlabs.io")
+        except Exception as exc:
+            return Availability.no(f"unreachable ({type(exc).__name__})", "check your network")
+        used = user.get("character_count")
+        cap = user.get("character_limit")
+        if isinstance(used, int) and isinstance(cap, int):
+            left = cap - used
+            # Worth surfacing: a 4-video day is roughly 2,400 characters, so a Starter plan's
+            # monthly allowance is consumed well before a month of daily runs.
+            if left <= 0:
+                return Availability.no(
+                    f"character quota exhausted ({used}/{cap})",
+                    "wait for the reset, upgrade, or set tts.backend: piper",
+                )
+            return Availability.yes(f"{left:,} of {cap:,} characters left this period")
+        return Availability.yes("key accepted")
 
+    def synthesize(self, text: str, out_path: Path, *, voice: str = "", model: str = "",
+                   **options) -> Path:
+        if not voice:
+            raise ElevenLabsError("no voice id: set tts.voice_id in creatoros.yaml")
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        body = {"text": text, "model_id": model or self.model,
+                "voice_settings": {**VOICE_SETTINGS, **(options.get("voice_settings") or {})}}
+        # mp3_44100_128 rather than 192 kbps: the higher bitrate needs a Creator plan, and
+        # the difference is inaudible under a music bed.
+        url = f"{API}/text-to-speech/{voice}?output_format=mp3_44100_128"
+        req = urllib.request.Request(
+            url, data=json.dumps(body).encode(), method="POST",
+            headers={"xi-api-key": self.key, "Content-Type": "application/json",
+                     "Accept": "audio/mpeg"})
+        part = out_path.with_suffix(out_path.suffix + ".part")
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                part.write_bytes(resp.read())
+            # Atomic: core.narrate treats any existing non-empty file as done, so a
+            # half-written clip would ship inside the video with no error anywhere.
+            os.replace(part, out_path)
+        except urllib.error.HTTPError as exc:
+            raise ElevenLabsError(
+                f"HTTP {exc.code} {exc.read()[:300].decode(errors='replace')}") from None
+        finally:
+            if part.exists():
+                part.unlink()
+        return out_path
 
-def pick_music(spec: dict, spec_path: str | os.PathLike, *, music_dir: str | os.PathLike,
-               mode: str = "library", api_key: str = "") -> dict:
-    """Choose or compose a music bed, and write the choice back into the spec.
+    def voices(self) -> list[Voice]:
+        if not self._has_key():
+            return []
+        try:
+            payload = self._get("/voices")
+        except Exception:
+            return []
+        out = []
+        for entry in payload.get("voices", []):
+            labels = entry.get("labels") or {}
+            out.append(Voice(
+                id=entry.get("voice_id", ""),
+                name=entry.get("name", ""),
+                languages=tuple(filter(None, [labels.get("language", "")])),
+                gender=labels.get("gender", ""),
+                detail=entry.get("category", ""),
+            ))
+        return out
 
-    "library" rotates the least recently used track in the workspace music folder, so a
-    week of videos does not open with the same eight bars. An empty folder is not an
-    error: no bed is a fine video.
-    """
-    if spec.get("music") or mode == "none":
-        return spec
-    music_dir = Path(music_dir)
-    music_dir.mkdir(parents=True, exist_ok=True)
-    used_path = music_dir / "music_used.json"
+    # ------------------------------------------------------- beyond the protocol
+    def compose(self, prompt: str, out_path: Path, *, length_ms: int = 75000) -> Path:
+        """Generate an instrumental bed. Not part of the TTS protocol.
 
-    if mode == "generate" and spec.get("music_prompt"):
-        key = (api_key or os.environ.get("ELEVENLABS_API_KEY", "")).strip()
-        name = f"gen_{spec.get('id', 'short')}.mp3"
-        err = _post(f"{API}/music?output_format=mp3_44100_128",
-                    {"prompt": spec["music_prompt"] + " Instrumental, leaves room for a voiceover.",
-                     "music_length_ms": 75000, "force_instrumental": True},
-                    str(music_dir / name), key) if key else "no ELEVENLABS_API_KEY"
-        if err:
-            print("!! music generation failed, using the library:", err)
-        else:
-            spec["music"] = name
-
-    if not spec.get("music"):
-        tracks = sorted(Path(p).name for p in glob.glob(str(music_dir / "*.mp3")))
-        if tracks:
-            used = json.loads(used_path.read_text()) if used_path.is_file() else {}
-            spec["music"] = min(tracks, key=lambda t: used.get(t, ""))
-            used[spec["music"]] = spec.get("id", "")
-            used_path.write_text(json.dumps(used, indent=1))
-        else:
-            print(f"no tracks in {music_dir} — rendering without a music bed")
-    spec_mod.save(spec, spec_path)
-    print("music", spec.get("music") or "(none)")
-    return spec
-
-
-def main(argv=None) -> int:
-    argv = list(argv if argv is not None else sys.argv[1:])
-    if not argv:
-        print("usage: python -m creatoros_autopilot.providers.tts.elevenlabs SPEC.json", file=sys.stderr)
-        return 2
-    spec_path = argv[0]
-    spec, problems = narrate(spec_path)
-    pick_music(spec, spec_path,
-               music_dir=os.environ.get("CREATOROS_MUSIC_DIR", "."),
-               mode=os.environ.get("CREATOROS_MUSIC_MODE", "library"))
-    if problems:
-        print("voice problems:\n  " + "\n  ".join(problems), file=sys.stderr)
-        return 1
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+        `core.music` calls this only when music.mode is "generate", and falls back to the
+        library when it fails or is absent — so a backend without it is not a problem.
+        """
+        out_path = Path(out_path)
+        body = {"prompt": prompt + " Instrumental, leaves room for a voiceover.",
+                "music_length_ms": length_ms, "force_instrumental": True}
+        req = urllib.request.Request(
+            f"{API}/music?output_format=mp3_44100_128", data=json.dumps(body).encode(),
+            method="POST", headers={"xi-api-key": self.key,
+                                    "Content-Type": "application/json",
+                                    "Accept": "audio/mpeg"})
+        part = out_path.with_suffix(".part")
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                part.write_bytes(resp.read())
+            os.replace(part, out_path)
+        finally:
+            if part.exists():
+                part.unlink()
+        return out_path

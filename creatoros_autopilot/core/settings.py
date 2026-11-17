@@ -46,9 +46,10 @@ class AgentSettings:
 
 @dataclass
 class TTSSettings:
-    backend: str = "none"            # none | elevenlabs | say   (piper lands in Phase 2)
+    #: A `creatoros.tts` plugin name. `creatoros doctor` lists what is installed.
+    backend: str = "none"
     voice_id: str = ""
-    model: str = "eleven_multilingual_v2"
+    model: str = ""
 
 
 @dataclass
@@ -64,10 +65,23 @@ class YouTubeSettings:
 
 
 @dataclass
+class ResearchSettings:
+    #: `creatoros.research` plugin names, queried in order and deduplicated by URL.
+    sources: list[str] = field(default_factory=list)
+    feeds: list[str] = field(default_factory=list)
+    lookback_days: int = 2
+    limit: int = 20
+
+
+@dataclass
 class PublishSettings:
     # Safe by default (principle 5): nothing goes live unless the user asks for it.
     mode: str = "draft"              # draft | auto
     platforms: list[str] = field(default_factory=list)
+    #: `creatoros.publish` plugin names in preference order. Empty means "whichever
+    #: installed publisher reaches the platform, preferring one that needs no third-party
+    #: account" — which is how a new user gets the direct APIs rather than a paid relay.
+    backends: list[str] = field(default_factory=list)
     offset_days: int = 1
     post_times: list[str] = field(default_factory=lambda: ["09:00"])
     youtube: YouTubeSettings = field(default_factory=YouTubeSettings)
@@ -82,7 +96,11 @@ class Settings:
     agent: AgentSettings = field(default_factory=AgentSettings)
     tts: TTSSettings = field(default_factory=TTSSettings)
     music: MusicSettings = field(default_factory=MusicSettings)
+    research: ResearchSettings = field(default_factory=ResearchSettings)
     publish: PublishSettings = field(default_factory=PublishSettings)
+    #: `creatoros.gate` plugin names. Opt-in: these encode a house style, and one channel's
+    #: house style is not a universal truth.
+    gates: list[str] = field(default_factory=list)
 
     # ---------------------------------------------------------------- derived paths
     @property
@@ -157,6 +175,7 @@ _NESTED = {
     ("Settings", "tts"): TTSSettings,
     ("Settings", "music"): MusicSettings,
     ("Settings", "publish"): PublishSettings,
+    ("Settings", "research"): ResearchSettings,
     ("PublishSettings", "youtube"): YouTubeSettings,
 }
 
@@ -187,6 +206,9 @@ ENV_OVERRIDES = {
     "CREATOROS_MUSIC_MODE": ("music", "mode"),
     "CREATOROS_MUSIC_DIR": ("music", "dir"),
     "CREATOROS_PUBLISH_MODE": ("publish", "mode"),
+    "CREATOROS_PUBLISH_BACKENDS": ("publish", "backends"),
+    "CREATOROS_GATES": ("gates",),
+    "CREATOROS_RESEARCH_SOURCES": ("research", "sources"),
     "CREATOROS_PUBLISH_PLATFORMS": ("publish", "platforms"),
     "CREATOROS_PUBLISH_OFFSET_DAYS": ("publish", "offset_days"),
     "CREATOROS_POST_TIMES": ("publish", "post_times"),

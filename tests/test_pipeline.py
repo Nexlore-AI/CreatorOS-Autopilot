@@ -12,39 +12,53 @@ import pytest
 from creatoros_autopilot.core import pipeline
 from creatoros_autopilot.core.ledger import Ledger
 from creatoros_autopilot.core.settings import Settings
-
-
-class Result:
-    """A publisher answer, with per-platform detail like Zernio's."""
-
-    def __init__(self, ok=True, platforms=()):
-        self.ok, self.platforms, self.post_id, self.dry_run = ok, list(platforms), "p1", False
-
-    def url_for(self, platform):
-        return f"https://example/{platform}"
+from creatoros_autopilot.interfaces import (
+    Availability, PlatformOutcome, Publisher, PublishResult,
+)
 
 
 class FakePublisher:
-    """Stands in for `providers.publish.zernio`.
+    """A real `Publisher`, so these tests check the pipeline against the actual contract.
 
     `raises` is a transport failure — the whole call died, nothing was created.
     `platform_errors` is the subtler case this pipeline has to get right: the post was
     created but one platform inside it failed, which is what Zernio's HTTP 207 means.
     """
 
+    name = "fake"
+    platforms = ("instagram", "youtube", "local")
+    third_party = False
+    records_publication = True
+
     def __init__(self, raises=(), platform_errors=()):
         self.calls = []
         self.raises = set(raises)
         self.platform_errors = set(platform_errors)
 
-    def publish(self, video, platforms, mode, at=None, tz="UTC", **kw):
-        self.calls.append({"video": video, "platforms": list(platforms), "mode": mode, "at": at})
-        if self.raises & set(platforms):
+    def available(self):
+        return Availability.yes("fake")
+
+    def requires(self, platform):
+        return ()
+
+    def publish(self, request):
+        self.calls.append({"video": request.video, "platforms": list(request.platforms),
+                           "mode": request.mode, "at": request.at})
+        if self.raises & set(request.platforms):
             raise RuntimeError("the upload connection died")
-        return Result(ok=True, platforms=[
-            {"platform": p, "status": "failed" if p in self.platform_errors else "published",
-             **({"error": "the platform rejected it"} if p in self.platform_errors else {})}
-            for p in platforms])
+        outcomes = [
+            PlatformOutcome(platform=p, ok=p not in self.platform_errors,
+                            url=f"https://example/{p}", post_id="p1",
+                            error="the platform rejected it" if p in self.platform_errors else "")
+            for p in request.platforms
+        ]
+        return PublishResult(ok=all(o.ok for o in outcomes), mode=request.mode,
+                             post_id="p1", outcomes=outcomes)
+
+
+def test_the_fake_really_satisfies_the_protocol():
+    """If the fake drifts from the interface these tests stop proving anything."""
+    assert isinstance(FakePublisher(), Publisher)
 
 
 @pytest.fixture
@@ -181,3 +195,79 @@ class TestGates:
             assert pipeline.run(day, date="2026-11-17", skip_agent=True).state == "busy"
         finally:
             held.release()
+
+
+class TestRouting:
+    """One backend, one call — however many platforms it covers.
+
+    The registry returns a fresh instance per lookup. Grouping routes by object identity
+    therefore produced one call per platform, which for Zernio would mean uploading the
+    same video twice and creating two posts where Phase 1 created one.
+    """
+
+    def test_one_backend_covering_two_platforms_is_called_once(self, day):
+        publisher = FakePublisher()
+        pipeline.publish_day(day, "2026-11-17", publisher=publisher)
+        per_video = {}
+        for call in publisher.calls:
+            per_video.setdefault(call["video"], []).append(call)
+        assert per_video, "nothing was published"
+        for video, calls in per_video.items():
+            assert len(calls) == 1, f"{video} was uploaded {len(calls)} times"
+            assert sorted(calls[0]["platforms"]) == ["instagram", "youtube"]
+
+    def test_routes_group_by_name_not_identity(self):
+        class Backend:
+            name = "shared"
+            platforms = ("instagram", "youtube")
+            third_party = False
+
+        # Two distinct objects with the same name, as the registry would produce.
+        made = []
+
+        def fresh(platform, preferred):
+            made.append(Backend())
+            return made[-1]
+
+        from creatoros_autopilot import plugins as plugins_mod
+
+        original = plugins_mod.publisher_for
+        plugins_mod.publisher_for = fresh
+        try:
+            routes = pipeline._routes(["instagram", "youtube"], [], None)
+        finally:
+            plugins_mod.publisher_for = original
+        assert len(routes) == 1, "the same backend must not be routed twice"
+        assert sorted(next(iter(routes.values()))[1]) == ["instagram", "youtube"]
+
+
+class TestPracticeRuns:
+    """A backend that does not publish must not mark the ledger done.
+
+    `local_folder` writes the video and the metadata that would have been sent. That is a
+    useful dry run, and recording it as published would mark the job done so the real
+    publisher skips it forever — a practice run silently consuming a real one.
+    """
+
+    def test_a_practice_backend_writes_no_ok_rows(self, day):
+        class Practice(FakePublisher):
+            name = "practice"
+            records_publication = False
+
+        pipeline.publish_day(day, "2026-11-17", publisher=Practice())
+        assert not day.ledger_path.exists() or not list(Ledger(day.ledger_path).entries())
+
+    def test_the_real_publisher_still_runs_afterwards(self, day):
+        class Practice(FakePublisher):
+            name = "practice"
+            records_publication = False
+
+        pipeline.publish_day(day, "2026-11-17", publisher=Practice())
+        real = FakePublisher()
+        pipeline.publish_day(day, "2026-11-17", publisher=real)
+        assert real.calls, "the real publisher was skipped after a practice run"
+        assert all(sorted(c["platforms"]) == ["instagram", "youtube"] for c in real.calls)
+
+    def test_a_real_backend_does_record(self, day):
+        pipeline.publish_day(day, "2026-11-17", publisher=FakePublisher())
+        assert list(Ledger(day.ledger_path).entries())

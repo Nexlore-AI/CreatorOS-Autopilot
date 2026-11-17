@@ -38,20 +38,7 @@ def _tree(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"))
 
 
-def code_only(path: Path) -> str:
-    """The file with comments and docstrings removed, other strings intact."""
-    tree = _tree(path)
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        body = node.body
-        if (body and isinstance(body[0], ast.Expr)
-                and isinstance(body[0].value, ast.Constant)
-                and isinstance(body[0].value.value, str)):
-            body.pop(0)
-            if not body:
-                body.append(ast.Pass())
-    return ast.unparse(ast.fix_missing_locations(tree))
+from .conftest import code_only
 
 
 def subprocess_literals(path: Path) -> set[str]:

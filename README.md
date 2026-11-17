@@ -7,10 +7,10 @@ machine, with your own keys.
 It runs the [Nexlore AI](https://www.youtube.com/@NexloreAI/shorts) channels every day:
 [YouTube](https://www.youtube.com/@NexloreAI/shorts) · [Instagram](https://www.instagram.com/nexloreai/reels/)
 
-> **Status: early.** Phase 1 of [the roadmap](docs/ROADMAP.md) has landed — the project is
-> an installable package with a cross-platform CLI, and it renders on macOS, Linux and
-> Windows with no API keys. The plugin system (Ollama, Piper, direct YouTube and Instagram
-> APIs) is Phase 2. Expect the command surface to be stable and the internals to move.
+> **Status: early.** Phases 1 and 2 of [the roadmap](docs/ROADMAP.md) have landed — an
+> installable package with a cross-platform CLI, and a plugin system where every provider
+> is an entry point. Brand kits and the `creatoros init` wizard are Phase 3. Expect the
+> command surface to be stable and the internals to move.
 
 ## Try it — no keys, no accounts
 
@@ -84,20 +84,37 @@ Two files, and neither of them is code:
 **Nothing publishes by default.** `publish.mode` ships as `draft` and `publish.platforms`
 ships empty, so until you change them the tool renders and stops.
 
-## What works today
+## Provider support
 
-| | |
-|---|---|
-| **Renderer** | Pillow + NumPy + ffmpeg, one house style (`nexlore-v3`) |
-| **LLM agent** | Claude Code (`claude -p`), or none |
-| **TTS** | ElevenLabs, or none. *Piper, for a free offline path, is Phase 2.* |
-| **Publishing** | Zernio (YouTube + Instagram). *Direct YouTube Data API and Instagram Graph API are Phase 2, and become the documented default.* |
-| **Scheduling** | launchd (macOS), systemd user timers (Linux), Scheduled Tasks (Windows) |
-| **Platforms** | macOS, Linux, Windows, Docker |
+Everything external is a plugin. `creatoros doctor` lists what is installed and whether it
+can run; a free column means no key, no account and no bill.
+
+| Kind | Provider | Free | Notes |
+|---|---|:--:|---|
+| **TTS** | `piper` | ✅ | local neural voices, offline |
+| | `say` | ✅ | macOS only |
+| | `elevenlabs` | | the best quality, and the one that costs money |
+| **LLM** | `ollama` | ✅ | local models; writes specs, cannot run the research agent |
+| | `claude_code` | | the full daily run: web research, competitor scan, self-review |
+| **Publish** | `local_folder` | ✅ | writes the video and the metadata that would be posted |
+| | `youtube` | ✅ | YouTube Data API v3, your own OAuth app |
+| | `instagram` | ✅ | Instagram Graph API; needs a Business/Creator account |
+| | `zernio` | | one upload fans out to both platforms |
+| **Research** | `rss`, `arxiv`, `huggingface_papers` | ✅ | |
+| **Style** | `nexlore-v3` | ✅ | the look in the examples above |
+| **Gates** | `langmix` | ✅ | language-mix check on the narration |
+
+**Adding one is a file and an entry point**, with no change to `creatoros_autopilot/core/`
+— there is a test that fails if core so much as names a provider.
+
+```toml
+[project.entry-points."creatoros.tts"]
+my-voice = "my_package.voices:MyVoice"
+```
 
 An earlier version of this README listed seven TTS backends. Only ElevenLabs was ever on
 the live path; the rest existed in a benchmark script that nothing called. The table above
-is what is actually wired up, and a test keeps it honest.
+is generated from what is registered, and a test keeps it honest.
 
 ## Requirements
 
