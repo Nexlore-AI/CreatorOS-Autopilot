@@ -1,6 +1,6 @@
 # CreatorOS Autopilot — Roadmap
 
-**Status:** Phases 1 and 2 complete (PRs #2, #3). Phase 0's audit stands as written below; findings
+**Status:** Phases 1–3 complete (PRs #2, #3, #4). Phase 0's audit stands as written below; findings
 it fixed are marked ✅. The four decisions in §6 were answered on
 2026-11-17 and are recorded there. Phases 1–7 are proposed, not started.
 
@@ -354,23 +354,54 @@ completes and writes the video with its would-be metadata.
 4. The Zernio collapse is real: four clients, ~1,170 lines, became one `_api.py` that the
    publisher plugin and all three operational tools call.
 
-### Phase 3 — Config, brands and onboarding
-- `creatoros init`: interactive wizard writing `creatoros.yaml` and `.env`; secrets never
-  written to the YAML and never echoed.
-- Brand kits (C-14, C-15, C-16): name, logo, colours, fonts pulled out of the engine into
-  `brands/*.yaml`. The engine takes a brand, and a missing logo degrades to a wordmark
-  instead of crashing.
-- Language as a setting (C-17): Hinglish becomes `language: {primary: hi, mix: en, ratio: 0.45}`
-  with the loanword lexicon as brand data. The gate is opt-in.
-- YouTube category and visibility become per-channel config (C-18).
-- Content pillars and daily/weekly/monthly schedules; cross-platform scheduling.
-- Move the Nexlore strategy into `examples/nexlore-ai/` (C-19), and author two more presets
-  beside it (decision 3): one English non-tech, one Spanish. Three presets is what proves
-  the brand and language settings work rather than asserting it.
+### Phase 3 — Config, brands and onboarding ✅
 
-**Acceptance:** a new user goes from `pip install` to a rendered video in under 10 minutes
-on the free local path, with no card and no accounts — timed on a clean machine, written up
-in `docs/QUICKSTART.md`.
+*Landed. Fixes C-14 … C-19, F-31.*
+
+- [x] `creatoros init`: interactive wizard writing `creatoros.yaml` and `.env`. Secrets go
+  to `.env` only, are never echoed, and the file is written `0600`. It parses its own
+  output before claiming success, and refuses to replace an existing config unasked.
+- [x] Brand kits (C-14, C-15, C-16): name, logo, colours, fonts out of the engine into
+  `brands/*.yaml`. A missing logo renders a wordmark, a missing font falls back to the
+  bundled one — a day's run is not lost because an image moved.
+- [x] **Verified byte-for-byte**: the Nexlore kit renders the examples pixel-identically to
+  a pre-refactor baseline, so the channel that already exists sees no change at all.
+- [x] Language as a setting (C-17). The gate reads the brand's `language` block, and a
+  brand with no mix disables it — a single-language channel has nothing to measure rather
+  than a check it always fails.
+- [x] YouTube category and visibility are per-channel config (C-18).
+- [x] Content pillars with daily, weekday, weekend, weekly and monthly cadences. The
+  `pillars/*.json` files described all of this and **nothing read them**: `schedule_ist`
+  was declared while launchd ran one job regardless, and `order: sequential` pointed at a
+  state file no code opened. The loader reads the existing files unchanged.
+- [x] Move the Nexlore strategy into `examples/nexlore-ai/` (C-19) and author two more
+  (decision 3): `ember-fitness` (English, free providers, no logo) and `claro-es` (neither
+  English nor mixed). Each preset is a self-contained folder — config, brand and pillars —
+  and relative paths resolve against the config file, so a scheduled run does not depend on
+  where it starts.
+
+**Acceptance — met, with room to spare.** On a clean directory:
+
+```
+creatoros init --yes     # render-only defaults, no key requested
+creatoros doctor         # all checks passed
+creatoros render kv-cache.json -o first.mp4
+```
+
+**19 seconds**, start to a finished 33.5-second 1080x1920 MP4, no key set and no account.
+The budget was ten minutes.
+
+**Two bugs I introduced and caught here**, both in the brand work:
+
+1. `apply_brand()` cleared the render cache unconditionally, so a 2160x3840 float array was
+   rebuilt once per scene instead of once per worker. The suite went from two minutes to
+   over nine.
+2. `Palette.__getattr__` read `self.colours`, which recurses forever when the object is
+   unpickled into a render worker — the attribute is missing until state is restored, so
+   the lookup calls itself. The only symptom was a job that never finished.
+
+The second is the more interesting one: it was invisible locally because the parent process
+never unpickles, and it would have appeared only under the multiprocessing render.
 
 ### Phase 4 — Contributor experience
 - pytest: spec validation, ledger idempotency (including the double-post regression),
