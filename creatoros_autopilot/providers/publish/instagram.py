@@ -37,11 +37,25 @@ duplicate post costs reach on an account that cannot delete-and-repost cleanly. 
 there returns the container id instead, for a human to check and finish.
 
 Two things the Graph API simply does not have: **scheduled publishing** for Reels, and a
-draft state. `mode: schedule` is an error here rather than a surprise immediate post —
-let the OS job from `creatoros schedule` run the publish at the slot time with `mode:
-now`, or use the Zernio backend, which does take `scheduledFor`. `mode: draft` creates
-and validates the container without publishing it, which is as close as this API gets;
-the container expires in 24 hours and is not visible in the app.
+draft state. Both modes are refused here rather than approximated, because both plausible
+approximations are worse than an error.
+
+`mode: schedule` cannot be honoured at all: a container goes live when `media_publish` is
+called and not before. Refusing it was only half the job, though. With the shipped
+`offset_days: 1` every slot is a day away, so `core.schedule.decide()` returns `schedule`
+for every video and this backend refuses all of them — and the fix it printed, "let the OS
+job publish at the slot time with `mode: now`", is not something a config file can say:
+`publish.mode` is `draft` or `auto`, and the installed job runs `creatoros run --if-due`
+once a day. The error now names the two settings that do work, because an error whose
+instructions cannot be followed is the same as no error at all.
+
+`mode: draft` looks honourable — create the container, validate it, publish nothing — and
+that is what this module did. But a container is not a draft: it is invisible in the app
+and expires in 24 hours, and it came back `ok`, so the ledger recorded instagram as
+published, the slot was marked done, and the real publish skipped that job forever. A
+day's Reels went nowhere while the run printed `published: 1`. So draft refuses too, and
+names what does work: `local_folder` for a practice run that records nothing, Zernio for a
+genuinely parked draft, `offset_days: 0` to post from here.
 
 The token goes in an `Authorization` header, never in a query string, so it cannot end up
 in a printed URL or in the text of a transport error.
@@ -76,6 +90,16 @@ MAX_ATTEMPTS = 4
 ACCOUNT_REQUIREMENT = (
     "The account must be an Instagram Business or Creator account linked to a Facebook "
     "Page; a personal Instagram account cannot use this API at all."
+)
+
+#: The only two ways this backend ever posts, because the Graph API publishes immediately
+#: or not at all. Both refusals in `publish()` quote it, so they cannot drift apart and
+#: start recommending different things for the same impossibility.
+POST_FROM_HERE = (
+    "set publish.offset_days: 0 with publish.mode: auto, so the day's run reaches a slot "
+    "time already behind it and decides `now`; or run the publish at the slot time "
+    "yourself with `creatoros publish <video> --mode now` (add --dry-run to see what "
+    "would be sent without sending it)"
 )
 
 
@@ -121,6 +145,7 @@ class Instagram:
     name = "instagram"
     platforms = ("instagram",)
     third_party = False
+    records_publication = True
 
     def __init__(self, *, access_token: str = "", business_account_id: str = "",
                  public_base_url: str = "", public_root: str = "", api_version: str = "",
@@ -214,7 +239,11 @@ class Instagram:
             # unavailable because publishing needs the same network, not as a key problem.
             return Availability.no(
                 "cannot reach graph.facebook.com",
-                "Retry when connected. To work offline, set publish.backend: local_folder.",
+                # `publish.backend` (singular) is not a setting: settings reject unknown
+                # keys, so the old wording here failed with a config error of its own.
+                "Retry when connected. To work offline, set publish.backends: "
+                "[local_folder], which writes the video and the metadata and publishes "
+                "nothing.",
             )
         detail = _error(status, payload)
         code = (payload.get("error") or {}).get("code") if isinstance(payload, dict) else None
@@ -232,7 +261,7 @@ class Instagram:
         )
 
     def requires(self, platform: str) -> tuple[str, ...]:
-        """The caption, and nothing else.
+        """The caption, and nothing else. A Reel without one gets no reach.
 
         `video_url` is deliberately not required: mapping a rendered path through
         `public_base_url` is the common case, and a spec that had to carry the URL could
@@ -327,25 +356,44 @@ class Instagram:
         return "timeout", (f"container {creation_id} was still {last} after "
                            f"{self.poll_timeout:g}s of processing")
 
-    def requires(self, platform: str) -> tuple[str, ...]:
-        """A Reel with no caption gets no reach and cannot be found."""
-        return ("caption",) if platform == "instagram" else ()
-
     def publish(self, request: PublishRequest) -> PublishResult:
         def failed(error: str) -> PublishResult:
             return PublishResult(ok=False, mode=request.mode, error=error,
                                  dry_run=request.dry_run,
                                  outcomes=[PlatformOutcome("instagram", False, error=error)])
 
+        # Both refusals come before the dry run deliberately. A dry run that passes in a
+        # mode this backend can never honour is worse than no dry run at all: it is the
+        # one check that would have caught a day of Reels going nowhere, and it agreed.
         if request.mode == SCHEDULE:
+            slot = f" for {request.at}" if request.at else ""
             return failed(
                 "the Instagram Graph API has no scheduled publish for Reels: a container "
-                "goes live when you call media_publish and not before. Install the daily "
-                "job with `creatoros schedule` and let it publish at the slot time with "
-                "mode: now, or use the zernio backend, which does take scheduledFor."
+                "goes live when media_publish is called and not before, and it expires 24 "
+                f"hours after it finishes, so there is nothing to park{slot}. With "
+                "publish.offset_days: 1 every slot is a day away, which is why this "
+                "refuses every video and not just some.\n"
+                f"To publish from here, {POST_FROM_HERE}.\n"
+                "To keep publishing onto a later day's slots, use a backend that really "
+                "schedules: publish.backends: [zernio] sends scheduledFor."
             )
-        if request.mode not in (DRAFT, NOW):
-            return failed(f"unknown mode {request.mode!r}: expected draft or now")
+        if request.mode == DRAFT:
+            # The Graph API can create a container and not publish it, which this backend
+            # used to report as ok. It is not a draft in any sense a user means: nobody
+            # can see it, nothing can be reviewed, and the ledger row it earned marked
+            # instagram done, so the real publish skipped the job until the container had
+            # expired. A refusal leaves the job pending, which is the recoverable state.
+            return failed(
+                "Instagram has no draft. The Graph API can create a Reel container and "
+                "leave it unpublished, but that container is invisible in the app and "
+                "expires in 24 hours, so counting it as published would mark instagram "
+                "done in the ledger while nothing was ever posted. Nothing was created.\n"
+                "For a practice run that records nothing, set publish.backends: "
+                "[local_folder]. For a post parked as a genuine draft you can review, "
+                f"publish.backends: [zernio]. To post from here, {POST_FROM_HERE}."
+            )
+        if request.mode != NOW:
+            return failed(f"unknown mode {request.mode!r}: expected draft, schedule or now")
         if "instagram" not in request.platforms:
             return failed(f"this backend only reaches instagram, not {list(request.platforms)}")
 
@@ -401,13 +449,6 @@ class Instagram:
                           "re-rendering.")
         if state != "finished":
             return failed(detail)
-
-        if request.mode == DRAFT:
-            print(f"container {creation_id} is FINISHED and was not published. Instagram has "
-                  "no draft state: this expires in 24 hours and is not visible in the app.")
-            return PublishResult(ok=True, mode=DRAFT, post_id=creation_id,
-                                 outcomes=[PlatformOutcome("instagram", True,
-                                                           post_id=creation_id)])
 
         # Deliberately not retried: Instagram offers no idempotency key, so a second
         # attempt after a dropped socket can publish a Reel that already went live.

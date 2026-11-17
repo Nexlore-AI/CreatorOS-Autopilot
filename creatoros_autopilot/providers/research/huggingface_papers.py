@@ -19,6 +19,12 @@ submitter is labelled as the submitter. Affiliations come from the paper's own m
 which `providers/research/arxiv.py` reads and which is empty when the authors gave none —
 an empty field is the honest answer and a badge is not a substitute for it.
 
+`Item.url` is the paper's **arXiv** page, not its Hugging Face one, because the URL is
+the deduplication key across sources: `providers/research/arxiv.py` rebuilds
+https://arxiv.org/abs/<bare id> for exactly that reason, and a huggingface.co/papers URL
+beside it made one paper two keys and therefore two videos about the same paper. The
+Hugging Face page, where the votes and the discussion are, travels in `extra["hf_url"]`.
+
 No key is involved: the endpoint is a public read. Hugging Face caps anonymous API calls
 at 500 per five-minute window per IP, which is the budget `fetch`'s day cap protects.
 """
@@ -55,6 +61,13 @@ MAX_DAYS = 14
 # repaired. Old-style ids (cs/0112017) contain a slash and are legitimate.
 IDENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]*(/[A-Za-z0-9.\-]+)?$")
 VERSIONED = re.compile(r"^(?P<base>.+?)v(?P<n>\d+)$")
+
+# Every id this list has ever carried is an arXiv one, and `Item.url` is built from that
+# assumption. It is still checked: a paper Hugging Face hosts itself would otherwise be
+# published under an arxiv.org address that 404s, which is a worse answer than linking
+# the page the paper is actually on. New style is 2411.01234, old style cs/0112017 or
+# math.GT/0309136.
+ARXIV_ID = re.compile(r"^(\d{4}\.\d{4,5}|[a-z-]+(\.[A-Z]{2})?/\d{7})$")
 
 PROBE = f'curl -sS "{API}?limit=1" | head -c 200'
 STATUS = "https://status.huggingface.co"
@@ -101,6 +114,14 @@ def _when(stamp: object) -> dt.datetime | None:
         # `fromisoformat` only learned to read a trailing Z in 3.11, and this project
         # supports 3.10.
         return dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _day(text: object) -> dt.date | None:
+    """A `YYYY-MM-DD` day as a date, or None when it is not one."""
+    try:
+        return dt.date.fromisoformat(_clean(text)[:10])
     except ValueError:
         return None
 
@@ -171,23 +192,33 @@ def _item(entry: object, source: str, day: str = "") -> Item | None:
         score = 0.0
 
     submitter = entry.get("submittedBy")
+    arxiv_id = ident if ARXIV_ID.match(ident) else ""
+    page = f"{PAPER_PAGE}/{ident}"
 
     return Item(
         title=title,
-        url=f"{PAPER_PAGE}/{ident}",
+        # `Item.key()` deduplicates on the URL, and one paper has two of them: this
+        # source links it at huggingface.co/papers/<id> and the arXiv source at
+        # arxiv.org/abs/<id>. Those are two keys, so the same paper arriving from both
+        # sources used to survive as two candidate topics and become two videos about
+        # it. The arXiv address is the one both sources can spell identically, so it is
+        # the one that goes here; the Hugging Face page is in `extra` below.
+        url=f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else page,
         summary=_clean(paper.get("summary")) or _clean(entry.get("summary")),
         published=_when(paper.get("publishedAt")) or _when(entry.get("publishedAt")),
         source=source,
         score=score,
         extra={
-            # `Item.key()` deduplicates on the URL, and one paper has two of them: this
-            # source links it at huggingface.co/papers/<id> and the arXiv source at
-            # arxiv.org/abs/<id>, which are two keys and therefore two videos about the
-            # same paper. The id is the only thing both sources agree on, so it travels
-            # under the name the arXiv source already writes, with that source's URL
-            # spelled out beside it.
-            "arxiv_id": ident,
-            "arxiv_url": f"https://arxiv.org/abs/{ident}",
+            # The id under the name the arXiv source already uses for it, so anything
+            # comparing the two sources by id rather than by URL also collapses them.
+            # Empty when the id is not an arXiv one, because an empty field is the
+            # honest answer and a guessed arxiv.org link is not.
+            "arxiv_id": arxiv_id,
+            "arxiv_url": f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else "",
+            # Where the votes, the discussion and the submitter are. `url` cannot be
+            # this, for the reason given above it, and a script that wants to point a
+            # viewer at the conversation needs it.
+            "hf_url": page,
             # Which day's list this came off, which is not the paper's publication date:
             # a list routinely carries a paper from last week.
             "daily_date": _clean(paper.get("submittedOnDailyAt"))[:10] or day,
@@ -270,21 +301,29 @@ class HuggingFacePapers:
 
     def fetch(self, *, since: dt.datetime | None = None, limit: int = 20,
               query: str = "") -> list[Item]:
-        """The window's papers, most upvoted first."""
+        """The window's papers, published no earlier than `since`, most upvoted first."""
         terms = _terms(query)
+        cutoff = _aware(since) if since is not None else None
         seen: set[str] = set()
         items: list[Item] = []
-        served, lost, failures = 0, [], []
+        served, stale, lost, failures = 0, 0, [], []
+        window = self._window(since)
+        newest_refused: HuggingFaceError | None = None
 
-        for day in self._window(since):
+        for day in window:
             try:
                 entries = self._get(day)
             except HuggingFaceError as exc:
-                if exc.status == 400:
-                    # The only 400 a clamped request can earn is a date past the newest
-                    # list, which the first day of the window is for the first hours of
-                    # a UTC day. That is not a failure, it is a day that does not exist
-                    # yet.
+                if exc.status == 400 and day == window[0]:
+                    # Hugging Face publishes a day's list during that day, and a date it
+                    # has not reached is a 400 rather than an empty list — so the newest
+                    # day asked for legitimately fails for the first hours of a UTC day.
+                    # Only that day: every 400 used to be waved through here, so a
+                    # renamed parameter or a date range the endpoint had stopped
+                    # accepting turned the whole window into `[]` with nothing printed
+                    # and nothing raised, and a source that had stopped working looked
+                    # exactly like a quiet weekend.
+                    newest_refused = exc
                     continue
                 failures.append(exc)
                 lost.append(day.isoformat())
@@ -300,10 +339,21 @@ class HuggingFacePapers:
                     continue
                 if terms and not _matches(terms, item):
                     continue
-                if item.extra["arxiv_id"] in seen:
+                if cutoff and item.published and item.published < cutoff:
+                    # A daily list is what people looked at today, not what came out
+                    # today, and it routinely carries a paper from the week before.
+                    # `since` used to pick which lists were asked for and nothing else,
+                    # so a one-day window came back full of papers published a fortnight
+                    # earlier and the run called one of them today's news. A paper with
+                    # no publication date at all is kept: the list it came off is inside
+                    # the window, which is more than nothing, and dropping it would be
+                    # this module going quiet over a field Hugging Face stopped sending.
+                    stale += 1
+                    continue
+                if item.key() in seen:
                     # A paper can sit on two days' lists; it is still one video.
                     continue
-                seen.add(item.extra["arxiv_id"])
+                seen.add(item.key())
                 items.append(item)
 
         if failures and not served:
@@ -312,15 +362,61 @@ class HuggingFacePapers:
             # raised once: a line per day would be the same message fourteen times on a
             # machine with no network. `available()` turns it into a fix.
             raise failures[0]
+        if not served and newest_refused is not None:
+            # No list arrived at all, so "a quiet day" is not an available explanation —
+            # there was no day. One undated request settles which it is, because the
+            # newest list is the one request whose date cannot be wrong.
+            self._diagnose(window[0], newest_refused)
+            return []
         if failures:
             # Some of the window arrived, so the run continues with it — but a short day
             # that was really a 500 must not pass for a quiet one.
             print(f"!! {self.name}: no list for {', '.join(lost)} ({failures[0]})")
+        if stale and not items:
+            # The lists arrived and every paper on them predates `since`. That is a
+            # legitimate empty answer, but it is not the same empty as a day with no
+            # list, and the operator can act on the difference.
+            print(f"!! {self.name}: every paper on the {served} list(s) asked for was "
+                  f"published before {cutoff.isoformat(timespec='minutes')} "
+                  f"({stale} dropped); "
+                  f"widen research.lookback_days to reach the papers a list carries "
+                  f"over from earlier in the week")
 
         # Stable sort, and the days were walked newest first, so papers tied on upvotes
         # keep the newer day's one ahead.
         items.sort(key=lambda found: -found.score)
         return items[:max(1, int(limit))]
+
+    def _diagnose(self, asked: dt.date, refused: HuggingFaceError) -> None:
+        """Say why a window came back with no list at all, or raise if it is this module.
+
+        A 400 on the newest day means either "that day has not happened here yet" or
+        "this request is wrong", and those need opposite responses: the first is a note
+        and an empty list, the second must stop the run. The undated request tells them
+        apart — it carries no date to be refused over — so one extra call buys a true
+        answer instead of a plausible one. It is only ever made when the window is empty.
+        """
+        newest = None
+        for entry in self._get(None):      # a source that is down raises here: the answer
+            item = _item(entry, self.name)
+            if item is not None:
+                newest = _day(item.extra.get("daily_date"))
+                break
+        if newest is not None and newest < asked:
+            print(f"!! {self.name}: no list for {asked.isoformat()} yet — the newest one "
+                  f"Hugging Face has is {newest.isoformat()}. Nothing is wrong; a run "
+                  f"this early in the UTC day needs a wider research.lookback_days to "
+                  f"find anything.")
+            return
+        if newest is None:
+            raise HuggingFaceShape(
+                f"Hugging Face refused the request for {asked.isoformat()} ({refused}) "
+                f"and its undated list carried no day this could read, so there is no "
+                f"list left to work from. {SHAPE_FIX}")
+        raise HuggingFaceShape(
+            f"Hugging Face refused the request for {asked.isoformat()} ({refused}) while "
+            f"serving a list for {newest.isoformat()} without one, so the date parameter "
+            f"is no longer read the way this module writes it. {SHAPE_FIX}")
 
     def _window(self, since: dt.datetime | None) -> list[dt.date]:
         """The days to ask for, newest first.

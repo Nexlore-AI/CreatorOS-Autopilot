@@ -7,10 +7,13 @@ a day that picked well could not be tested. Here the same job is a function of
 (since, limit, query) -> items over a feed that needs no key, so it can be unit tested
 against a recorded response and swapped for another source by name.
 
-The categories are a constructor argument rather than a constant. cs.AI/cs.LG/cs.CL is
-the default because that is the channel this grew out of, but a biology channel passes
-q-bio and gets the identical code path; nothing in this module knows what a paper is
-about.
+The categories are configuration rather than a constant. cs.AI/cs.LG/cs.CL is the default
+because that is the channel this grew out of, but a biology channel sets
+CREATOROS_ARXIV_CATEGORIES=q-bio.NC,q-bio.QM and gets the identical code path; nothing in
+this module knows what a paper is about. The environment variable is how that choice
+reaches here at all: `plugins.load` builds every source by calling the factory with no
+arguments, and `ResearchSettings` has no field for categories, so while the constructor
+argument was the only way in, this paragraph described something no user could do.
 
 arXiv's API Terms of Use ask callers for at most one request every three seconds over a
 single connection, and ask clients to identify themselves in the User-Agent. Those are
@@ -20,6 +23,7 @@ below rather than left to each caller's good behaviour.
 from __future__ import annotations
 
 import datetime as dt
+import os
 import re
 import threading
 import time
@@ -49,6 +53,15 @@ CATEGORY = re.compile(r"^[A-Za-z][A-Za-z-]*(\.[A-Za-z][A-Za-z-]*)?$")
 # A query the caller has already written in arXiv's own field syntax, which must be
 # passed through untouched instead of being wrapped.
 FIELDED = re.compile(r"\b(all|ti|abs|au|co|jr|cat|rn|id):")
+# What a plain query cannot carry into a quoted phrase. arXiv's parser has no escape for a
+# double quote inside one — all:"\"x\"" is an HTTP 400 — and a bare quote ends the phrase
+# early. The backslash goes with it because a query ending in one builds that same
+# unparseable `\"` against the closing quote.
+UNQUOTABLE = re.compile(r'["\\]')
+
+#: Where the categories come from when nobody passes any. Named rather than read inline so
+#: the message for an unusable value can name it too.
+ENV_CATEGORIES = "CREATOROS_ARXIV_CATEGORIES"
 
 PROBE = f'curl -sS "{API}?search_query=all&max_results=1" | head -5'
 TAXONOMY = "https://arxiv.org/category_taxonomy"
@@ -106,11 +119,17 @@ def _when(entry: ET.Element) -> dt.datetime | None:
 
 
 def _aware(moment: dt.datetime | None) -> dt.datetime | None:
-    """`since` as something comparable with a feed timestamp, which is always UTC.
+    """A timestamp comparable with every other one here: timezone-aware, or absent.
 
-    A naive datetime is read as UTC rather than as local time. Callers get `since` from
-    the schedule, which works in UTC, and reading it as local time would quietly move the
-    cut-off by hours in either direction depending on where the machine is.
+    A naive datetime is read as UTC rather than as local time. Both sides of the
+    comparison in `fetch` need it. `since` comes from the schedule, which works in UTC,
+    and reading it as local time would quietly move the cut-off by hours in either
+    direction depending on where the machine is. The feed's own stamps are UTC too, but
+    not all of them say so — '2024-11-15T18:59:59' and '2024-11-15' both parse naive — and
+    `_item` fed one of those straight through for a while, which made the cut-off
+    comparison raise TypeError and lose the whole feed, every sound entry in it included,
+    over one sloppy stamp. The interface promises aware datetimes; this is where they
+    become aware.
     """
     if moment is None:
         return None
@@ -175,7 +194,7 @@ def _item(entry: ET.Element, source: str) -> Item | None:
         title=title,
         url=url,
         summary=_squash(entry.findtext(f"{ATOM}summary")),
-        published=_when(entry),
+        published=_aware(_when(entry)),
         source=source,
         # No score. arXiv publishes no popularity signal of any kind, so this stays 0.0
         # and anything that ranks items must take its signal from a source that has one
@@ -201,20 +220,50 @@ def _item(entry: ET.Element, source: str) -> Item | None:
     )
 
 
+def _no_categories(source: str) -> tuple[str, str]:
+    """Why an empty category list is refused, and what to set instead.
+
+    It used to fall through to `search_query=all`, which arXiv reads as all:all — every
+    paper on arXiv, in every field — and `available()` reported OK, so nothing between the
+    typo and the screen noticed. A source configured for q-bio answering with a stream of
+    machine-learning papers is not a smaller version of the right answer.
+    """
+    return (
+        f"no arXiv categories configured ({source} names none)",
+        f"Set {ENV_CATEGORIES} to a comma-separated list — "
+        f"{ENV_CATEGORIES}={','.join(DEFAULT_CATEGORIES)} — or unset it for that default. "
+        f"See {TAXONOMY}",
+    )
+
+
 class ArXiv:
     """arXiv's Atom API as a `ResearchSource`."""
 
     name = "arxiv"
 
-    def __init__(self, categories: str | list[str] | tuple[str, ...] = DEFAULT_CATEGORIES,
+    def __init__(self, categories: str | list[str] | tuple[str, ...] | None = None,
                  *, timeout: float = 30.0, min_interval: float = MIN_INTERVAL) -> None:
-        if isinstance(categories, str):
-            categories = categories.split(",")
-        self.categories = [c.strip() for c in categories if c and c.strip()]
+        # Three sources, in order: the argument, the environment, the default. A variable
+        # that is set but names no category is kept as the empty list it is rather than
+        # quietly replaced by the default, because that is a typo the operator needs told
+        # about; whitespace alone counts as unset, since an empty variable in a compose
+        # file or a `.env` means "not set" and not "search nothing". `source` exists so the
+        # complaint can name the setting that is wrong instead of the symptom.
+        environ = os.environ.get(ENV_CATEGORIES, "")
+        if categories is None:
+            given, self.source = ((environ, ENV_CATEGORIES) if environ.strip()
+                                  else (DEFAULT_CATEGORIES, "the built-in default"))
+        else:
+            given, self.source = categories, "the categories argument"
+        if isinstance(given, str):
+            given = given.split(",")
+        self.categories = [c.strip() for c in given if c and c.strip()]
         self.timeout = timeout
         self.min_interval = min_interval
 
     def available(self) -> Availability:
+        if not self.categories:
+            return Availability.no(*_no_categories(self.source))
         bad = [c for c in self.categories if not CATEGORY.match(c)]
         if bad:
             return Availability.no(
@@ -279,16 +328,36 @@ class ArXiv:
     def _search(self, query: str) -> str:
         """The `search_query` expression for a caller's words, or for the categories."""
         query = (query or "").strip()
+        if not self.categories:
+            # Never "all". See `_no_categories` for what that cost.
+            detail, fix = _no_categories(self.source)
+            raise ValueError(f"{detail}. {fix}")
         by_category = " OR ".join(f"cat:{c}" for c in self.categories)
         if not query:
-            return by_category or "all"
+            return by_category
         if FIELDED.search(query):
             return query
         # Plain words are scoped to the configured categories: a source set up for q-bio
         # that answered a search with machine-learning papers would be a surprise, not a
         # feature. A caller who wants the whole of arXiv says so in arXiv's syntax.
-        scoped = f'all:"{query}"'
-        return f"{scoped} AND ({by_category})" if by_category else scoped
+        #
+        # Quotes the caller typed are dropped rather than escaped, because arXiv has no
+        # escape for them. `the "bitter lesson" revisited` went out as
+        # all:"the " OR bitter OR lesson OR all:" revisited" AND (cat:cs.AI): the phrase
+        # split into an OR of fragments with the category filter left clinging to the last
+        # one. Live, that query reports 3.2 million unrelated papers as a successful
+        # search; with the quotes removed it reports 0, which is the true answer and is
+        # exactly what the same words without quotes have always done.
+        phrase = _squash(UNQUOTABLE.sub(" ", query))
+        if not phrase:
+            # The category feed is not an answer to a search. Falling back to it here
+            # would hand today's papers back as results for a query they have nothing to
+            # do with, which is the same lie as `all` with a smaller blast radius.
+            raise ValueError(
+                f"nothing searchable in query {query!r}: arXiv cannot carry a quote or a "
+                "backslash inside a phrase, and this query is made of nothing else"
+            )
+        return f'all:"{phrase}" AND ({by_category})'
 
     def _get(self, search: str, limit: int) -> bytes:
         params = {

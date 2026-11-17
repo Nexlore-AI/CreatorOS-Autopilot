@@ -19,6 +19,13 @@ https://huggingface.co/rhasspy/piper-voices, and each one is *two* files, `<name
 and `<name>.onnx.json`. Piper's own error when the json is missing names neither the file
 nor where to get it, so that pairing is checked here instead.
 
+Where those two files live is not a detail either: it decides whether the *scheduled*
+run can speak, which is the only run most installs ever make. The search path is absolute
+and comes from `runtime` — never a relative directory. `search_path` says why at length.
+Nothing here writes into a checkout, which is as well: `.gitignore` covers `*.mp3` and
+`*.wav` but not `*.onnx`, so a `PIPER_VOICE_DIR` pointed inside a clone would offer git
+60 MB of model.
+
 If `piper` was installed from a release archive rather than with pip, it also needs its
 `espeak-ng-data` directory beside the binary. Nothing here can see that from the outside,
 so the check is Piper's: its stderr is quoted back in full when synthesis fails.
@@ -35,7 +42,7 @@ from pathlib import Path
 from ...core import media
 from ...interfaces.availability import Availability
 from ...interfaces.tts import Voice
-from ...runtime import os_name
+from ...runtime import default_workspace, os_name, user_config_dir
 
 VOICES_URL = "https://huggingface.co/rhasspy/piper-voices"
 RELEASES_URL = "https://github.com/rhasspy/piper/releases"
@@ -71,14 +78,67 @@ def binary() -> str | None:
     return shutil.which(override) if override else shutil.which("piper")
 
 
-def voice_dir() -> Path:
-    """Where voice models are looked for.
+def search_path() -> list[Path]:
+    """Every directory a voice model is looked for in, read on every call.
 
-    Read on every call rather than at import: the default is relative to the working
-    directory, and the CLI renders from wherever the user happens to be.
+    The default used to be `Path.cwd() / "piper-voices"`, which made "is a voice
+    installed?" a question about where the user was standing. It answered yes from the
+    project directory and no one level up, and `runtime/units.py` emits no working
+    directory for the unit it installs, so the daily run looked in `/piper-voices` under
+    launchd and `~/piper-voices` under a systemd user timer. The scheduled run is this
+    product's primary mode: the default was wrong in exactly the case nobody watches, and
+    right whenever anyone checked by hand.
+
+    `user_config_dir()` comes first because it is the one location that does not move. The
+    workspace does: it is set in `creatoros.yaml` or by `CREATOROS_WORKSPACE`, which
+    `schedule install` bakes into the unit, so voices kept under the workspace would be
+    found interactively and missing at 06:30 — the same bug wearing a different hat. The
+    workspace is still searched, for anyone who would rather keep 60 MB of model beside
+    the renders, and `PIPER_VOICE_DIR` still overrides both outright.
     """
     env = os.environ.get("PIPER_VOICE_DIR", "").strip()
-    return Path(env).expanduser() if env else Path.cwd() / DEFAULT_VOICE_DIR
+    if env:
+        return [Path(env).expanduser()]
+    # Deduplicated because on macOS the workspace sits inside the config directory, so
+    # both helpers can name the same folder.
+    found: list[Path] = []
+    for base in (user_config_dir(), default_workspace()):
+        path = base / DEFAULT_VOICE_DIR
+        if path not in found:
+            found.append(path)
+    return found
+
+
+def voice_dir() -> Path:
+    """Where a voice downloaded now should go: the first directory on the search path."""
+    return search_path()[0]
+
+
+def _searched() -> str:
+    """The search path, for a message that has to say "not here"."""
+    return " or ".join(str(path) for path in search_path())
+
+
+def _root_of(onnx: Path) -> Path | None:
+    """Which search directory a model was found under, for messages that name a place."""
+    for directory in search_path():
+        try:
+            onnx.relative_to(directory)
+        except ValueError:
+            continue
+        return directory
+    return None
+
+
+def _quoted(path: Path | str) -> str:
+    """A path as one shell word, for a fix line that is meant to be pasted.
+
+    Double quotes rather than `shlex.quote`: the default directory contains a space on
+    macOS ("Application Support"), and `"..."` is the one form cmd.exe, PowerShell and
+    every POSIX shell agree on. Unquoted, curl reads two half-paths and drops a 60 MB
+    model into a file called `Application`.
+    """
+    return '"' + str(path) + '"'
 
 
 def config_for(onnx: Path) -> Path | None:
@@ -94,20 +154,23 @@ def config_for(onnx: Path) -> Path | None:
 
 
 def models(models_dir: Path | None = None) -> list[tuple[Path, Path | None]]:
-    """Every `.onnx` under the models directory, each with its config or None.
+    """Every `.onnx` on the search path, or in one named directory, with its config or None.
 
     The search is recursive because the Hugging Face repo is laid out
     `<language>/<locale>/<name>/<quality>/` and people clone or rsync it whole rather than
     flattening it into one folder.
     """
-    models_dir = voice_dir() if models_dir is None else models_dir
-    try:
-        if not models_dir.is_dir():
-            return []
-        found = sorted(models_dir.rglob("*.onnx"))
-    except OSError:
-        return []
-    return [(onnx, config_for(onnx)) for onnx in found]
+    dirs = search_path() if models_dir is None else [Path(models_dir)]
+    found: list[Path] = []
+    for directory in dirs:
+        try:
+            if directory.is_dir():
+                found += sorted(directory.rglob("*.onnx"))
+        except OSError:
+            continue
+    # `dict.fromkeys` keeps the order and drops the duplicate when one search directory
+    # contains another, which on macOS they do.
+    return [(onnx, config_for(onnx)) for onnx in dict.fromkeys(found)]
 
 
 def _read_config(path: Path | None) -> dict:
@@ -130,31 +193,57 @@ def _download_fix(models_dir: Path) -> str:
     onnx = models_dir / f"{EXAMPLE}.onnx"
     return (
         f"download a voice — both files — or set PIPER_VOICE_DIR to where yours already are:\n"
-        f"  curl -L --create-dirs -o {onnx} {EXAMPLE_URL} -o {onnx}.json {EXAMPLE_URL}.json\n"
+        f"  curl -L --create-dirs -o {_quoted(onnx)} {EXAMPLE_URL} "
+        f"-o {_quoted(f'{onnx}.json')} {EXAMPLE_URL}.json\n"
         f"the rest, in dozens of languages, are at {VOICES_URL}"
     )
 
 
-def _find(name: str, models_dir: Path) -> Path | None:
-    """One model, named either by path or by model name."""
+def _legacy_hint() -> str:
+    """Voices sitting in `./piper-voices`, which was the default until it proved unschedulable.
+
+    Not searched any more, but named: otherwise upgrading turns 60 MB of model that is
+    right there into a baffling "no voices" and a second download.
+    """
+    try:
+        stray = Path.cwd() / DEFAULT_VOICE_DIR
+    except OSError:          # the working directory was deleted under us; advice only
+        return ""
+    if stray in search_path() or not any(config for _, config in models(stray)):
+        return ""
+    return (f"\nthere are voices in {stray}, which is no longer searched because the working "
+            f"directory is not the same one the scheduler runs in: move them, or set "
+            f"PIPER_VOICE_DIR={_quoted(stray)}")
+
+
+def _find(name: str, models_dir: Path | None = None) -> Path | None:
+    """One model, named either by path or by model name.
+
+    A name is looked for on the whole search path, not just in the directory a download
+    would go to: a voice in either place is installed, and "I can see it but piper says it
+    is missing" is not an error anyone can act on.
+    """
     candidate = Path(name).expanduser()
     if candidate.suffix == ".onnx":
         return candidate if candidate.is_file() else None
     if candidate.parent != Path("."):
         with_suffix = Path(f"{candidate}.onnx")
         return with_suffix if with_suffix.is_file() else None
-    try:
-        matches = sorted(models_dir.rglob(f"{name}.onnx")) if models_dir.is_dir() else []
-    except OSError:
-        return None
-    return matches[0] if matches else None
+    dirs = search_path() if models_dir is None else [Path(models_dir)]
+    for directory in dirs:
+        try:
+            matches = sorted(directory.rglob(f"{name}.onnx")) if directory.is_dir() else []
+        except OSError:
+            continue
+        if matches:
+            return matches[0]
+    return None
 
 
 def _resolve(voice: str, model: str) -> tuple[Path, Path]:
     """The model to speak with and its config, or an error naming what is installed."""
-    models_dir = voice_dir()
     requested = voice.strip()
-    if not requested and model.strip() and _find(model.strip(), models_dir):
+    if not requested and model.strip() and _find(model.strip()):
         # `tts.model` exists for ElevenLabs, where the model and the voice are separate
         # things, so a config written for it holds something like "eleven_multilingual_v2".
         # For Piper the model *is* the voice, so the field is honoured — but only when it
@@ -162,23 +251,24 @@ def _resolve(voice: str, model: str) -> tuple[Path, Path]:
         requested = model.strip()
 
     if not requested:
-        usable = [onnx for onnx, config in models(models_dir) if config]
+        usable = [onnx for onnx, config in models() if config]
         if len(usable) == 1:
             return usable[0], config_for(usable[0])
         if not usable:
-            raise PiperError(f"no piper voice models in {models_dir}. {_download_fix(models_dir)}")
+            raise PiperError(f"no piper voice models in {_searched()}. "
+                             f"{_download_fix(voice_dir())}{_legacy_hint()}")
         raise PiperError(
             f"{len(usable)} piper voices are installed and none was chosen. Set tts.voice_id "
             f"in creatoros.yaml to one of: {', '.join(sorted(p.stem for p in usable))}"
         )
 
-    found = _find(requested, models_dir)
+    found = _find(requested)
     if not found:
-        installed = ", ".join(sorted(onnx.stem for onnx, _ in models(models_dir))) or "(none)"
+        installed = ", ".join(sorted(onnx.stem for onnx, _ in models())) or "(none)"
         raise PiperError(
             f"no piper voice model {requested!r}: looked for {requested}.onnx under "
-            f"{models_dir}, and found {installed}. Models come from {VOICES_URL}; set "
-            "PIPER_VOICE_DIR if yours live somewhere else."
+            f"{_searched()}, and found {installed}. Models come from {VOICES_URL}; set "
+            f"PIPER_VOICE_DIR if yours live somewhere else.{_legacy_hint()}"
         )
     config = config_for(found)
     if not config:
@@ -194,6 +284,34 @@ def _discard(path: Path) -> None:
         path.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _wav_is_empty(path: Path) -> bool:
+    """Whether a WAV is a header with no samples behind it.
+
+    Deliberately narrow: yes only for a RIFF/WAVE file whose `data` chunk is followed by
+    nothing at all. Anything this cannot parse gets no opinion, because refusing to speak
+    over a container we failed to read would be a worse bug than the one it catches.
+
+    The declared chunk length is not consulted — some writers leave it at 0 or at
+    0xFFFFFFFF when the output is a stream — only whether a single byte of audio exists.
+    """
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(12)
+            if len(header) < 12 or header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+                return False
+            while True:
+                chunk = handle.read(8)
+                if len(chunk) < 8:
+                    return False            # ran out before any data chunk: no opinion
+                length = int.from_bytes(chunk[4:], "little")
+                if chunk[:4] == b"data":
+                    return handle.read(1) == b""
+                # Chunks are word-aligned: an odd length carries a pad byte after it.
+                handle.seek(length + length % 2, 1)
+    except OSError:
+        return False
 
 
 def _tail(stream: bytes, limit: int = 400) -> str:
@@ -223,21 +341,20 @@ class Piper:
                 )
             return Availability.no("piper is not on PATH", INSTALL_HINT[os_name()])
 
-        models_dir = voice_dir()
-        installed = models(models_dir)
+        installed = models()
         usable = [onnx for onnx, config in installed if config]
         if not usable:
             if installed:
                 names = ", ".join(sorted(onnx.name for onnx, _ in installed))
                 return Availability.no(
-                    f"piper is installed, but no model in {models_dir} has its .onnx.json "
+                    f"piper is installed, but no model in {_searched()} has its .onnx.json "
                     f"({names})",
                     f"a voice is two files: fetch <model>.onnx.json next to each model from "
                     f"{VOICES_URL}",
                 )
             return Availability.no(
-                f"piper is installed but there are no voice models in {models_dir}",
-                _download_fix(models_dir),
+                f"piper is installed but there are no voice models in {_searched()}",
+                _download_fix(voice_dir()) + _legacy_hint(),
             )
 
         if not media.find("ffmpeg"):
@@ -249,7 +366,8 @@ class Piper:
                 media.INSTALL_HINT[os_name()],
             )
 
-        return Availability.yes(f"{found}, {len(usable)} voice(s) in {models_dir}")
+        where = ", ".join(sorted({str(_root_of(onnx) or onnx.parent) for onnx in usable}))
+        return Availability.yes(f"{found}, {len(usable)} voice(s) in {where}")
 
     def synthesize(self, text: str, out_path: Path, *, voice: str = "",
                    model: str = "", **options) -> Path:
@@ -279,26 +397,58 @@ class Piper:
             command += ["--length_scale", str(options["length_scale"]).strip()]
 
         try:
-            spoken = subprocess.run(command, input=line.encode("utf-8"),
-                                    capture_output=True, timeout=TIMEOUT)
+            try:
+                spoken = subprocess.run(command, input=line.encode("utf-8"),
+                                        capture_output=True, timeout=TIMEOUT)
+            except subprocess.TimeoutExpired:
+                raise PiperError(f"piper produced nothing in {TIMEOUT}s on {onnx.name} "
+                                 "and was killed") from None
+            except OSError as exc:
+                raise PiperError(f"piper could not be run: {exc}") from None
             if spoken.returncode != 0:
                 raise PiperError(
                     f"piper exited {spoken.returncode} on {onnx.name}: {_tail(spoken.stderr)}"
                 )
             if not wav.is_file() or wav.stat().st_size == 0:
                 raise PiperError(f"piper wrote no audio for {onnx.name}: {_tail(spoken.stderr)}")
+            if _wav_is_empty(wav):
+                # Exit 0, a valid WAV, nothing in it. Piper does this when its phonemiser
+                # produces no phonemes for the text — a script the voice has no model for
+                # is the usual reason. A size check passes a 44-byte header, and ffmpeg
+                # turns zero samples into a frameless mp3 that is not empty either, so
+                # this used to be returned as a finished clip: the manifest recorded it,
+                # the renderer fell back to the scene's minimum duration, and the video
+                # shipped with the line silent. Every later run then said "unchanged".
+                raise PiperError(
+                    f"piper exited cleanly but spoke nothing: {onnx.stem} produced an "
+                    f"empty wav for {len(line)} characters. Its phonemiser most likely "
+                    f"has no voice for this script — use a model for the language you are "
+                    f"writing in, from {VOICES_URL}. piper said: {_tail(spoken.stderr)}"
+                )
 
             # `-f mp3` is explicit because the extension ffmpeg would infer the format
             # from is `.part` at this point.
-            converted = subprocess.run(
-                [media.require("ffmpeg"), "-y", "-loglevel", "error", "-i", str(wav),
-                 "-f", "mp3", "-b:a", "128k", "-ar", "44100", "-ac", "1", str(part)],
-                capture_output=True, timeout=TIMEOUT,
-            )
+            try:
+                converted = subprocess.run(
+                    [media.require("ffmpeg"), "-y", "-loglevel", "error", "-i", str(wav),
+                     "-f", "mp3", "-b:a", "128k", "-ar", "44100", "-ac", "1", str(part)],
+                    capture_output=True, timeout=TIMEOUT,
+                )
+            except subprocess.TimeoutExpired:
+                raise PiperError(f"ffmpeg did not convert piper's wav in {TIMEOUT}s and "
+                                 "was killed") from None
             if converted.returncode != 0:
                 raise PiperError(
                     f"ffmpeg could not turn piper's wav into mp3: {_tail(converted.stderr)}"
                 )
+            if not part.is_file() or part.stat().st_size == 0:
+                raise PiperError(
+                    f"ffmpeg exited 0 but produced no mp3 from piper's wav: "
+                    f"{_tail(converted.stderr)}"
+                )
+            # The rename is the last step, so the clip at out_path is either the previous
+            # one or a whole new one — never a half-converted file, which `core.narrate`
+            # would cache as done and the video would ship truncated.
             os.replace(part, out_path)
         finally:
             _discard(wav)
@@ -307,9 +457,8 @@ class Piper:
 
     def voices(self) -> list[Voice]:
         """What is on disk. Empty is a normal answer — the models are a separate download."""
-        models_dir = voice_dir()
         out = []
-        for onnx, config in models(models_dir):
+        for onnx, config in models():
             info = _read_config(config)
             language = _section(info, "language")
             code = language.get("code") or _section(info, "espeak").get("voice") or ""
@@ -326,10 +475,8 @@ class Piper:
                 detail.append(f"{rate} Hz")
             if speakers > 1:
                 detail.append(f"{speakers} speakers — pick one with speaker=N")
-            try:
-                where = onnx.parent.relative_to(models_dir)
-            except ValueError:
-                where = onnx.parent
+            root = _root_of(onnx)
+            where = onnx.parent.relative_to(root) if root else onnx.parent
             if str(where) != ".":
                 detail.append(f"in {where}")
 

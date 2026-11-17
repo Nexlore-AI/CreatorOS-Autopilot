@@ -20,12 +20,16 @@ Two things about this endpoint are worth knowing before reading the code:
 * `publishAt` is honoured only when `privacyStatus` is `private`. Send `public` with a
   `publishAt` and the API answers 200, drops the schedule, and the video is live
   immediately — the single most common mistake with this API. So a scheduled upload here
-  is always uploaded private, and what that changes is printed.
+  is always uploaded private, and YouTube makes it **public** at `publishAt`. There is no
+  scheduled private and no scheduled unlisted, so `visibility: private` with
+  `mode: schedule` is refused rather than reinterpreted: it was accepted silently once,
+  and a video somebody had asked to keep private went public at `publishAt`.
 * Resumption is not a bandwidth optimisation. The upload session is the only idempotency
   this API offers: a failed upload restarted by opening a *new* session publishes the
   video twice whenever the first attempt actually got there. So a dropped connection is
   answered by asking the existing session how many bytes it holds and continuing from
-  that byte, never by starting again.
+  that byte, never by starting again — including on the attempt that gives up, which is
+  exactly when the answer matters most.
 
 There is no draft on YouTube. `mode: draft` uploads the video as private and says so.
 
@@ -72,6 +76,15 @@ LIMITS = {"title": 100, "description": 5000, "tag": 100, "tags_total": 500,
 CATEGORY_SCI_TECH = "28"
 # A socket timeout, not a deadline for the transfer: it bounds one blocking read or write.
 UPLOAD_TIMEOUT = 600
+# How long to keep asking a session that holds every byte but has not yet named the video.
+# A 308 covering the whole file is YouTube finalising an upload that arrived, so the only
+# correct move is to wait for the id: there is nothing left to send.
+FINALISE_WAITS = (2, 5, 10)
+# YAML and JSON both produce real booleans for `true`, but a spec written by hand says
+# "false" or "no" often enough to matter, and these values are declarations rather than
+# preferences — so each one is read from a closed set and anything else is refused.
+TRUTHY = frozenset({"true", "yes", "y", "on", "1"})
+FALSY = frozenset({"false", "no", "n", "off", "0"})
 # What a Google error reason means in practice, since the API's own message rarely says.
 HINTS = {
     "quotaExceeded": "an upload spends 1600 of the default 10,000 daily quota units, so "
@@ -201,6 +214,24 @@ def _plain(text: str) -> str:
     return text.replace("<", "").replace(">", "")
 
 
+def _flag(value, key: str) -> bool:
+    """A spec value that must be a boolean, read strictly.
+
+    `bool("false")` is True, and this is how `made_for_kids: "false"` declared a video
+    made for kids: a legal self-declaration to YouTube that then turns off its comments,
+    notifications, personalised ads and end screens. Guessing at a string is not worth
+    that, so anything outside the two sets is refused and names itself.
+    """
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in TRUTHY:
+        return True
+    if text in FALSY:
+        return False
+    raise PublishError(f"platforms.youtube.{key} must be true or false, not {value!r}")
+
+
 def _tags(tags) -> list[str]:
     kept, total = [], 0
     for tag in tags:
@@ -230,6 +261,22 @@ def _rfc3339(at: str, tz_name: str) -> str:
     return moment.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _resume_point(received: str, size: int) -> int:
+    """The next byte to send, from a 308's `Range: bytes=0-N` header.
+
+    `N` is the last byte stored, so the next one is N+1. No `Range` at all means nothing
+    arrived, which is a start from zero. A value past the end of the file is clamped to
+    `size` rather than trusted: it can only mean the session holds everything.
+    """
+    if "-" not in received:
+        return 0
+    try:
+        last = int(received.rsplit("-", 1)[1])
+    except ValueError as exc:
+        raise PublishError(f"could not read the resume position from {received!r}") from exc
+    return min(last + 1, size)
+
+
 def _fail(request: PublishRequest, error: str) -> PublishResult:
     print(f"publish failed: {error}")
     return PublishResult(ok=False, mode=request.mode, error=error, dry_run=request.dry_run,
@@ -242,6 +289,7 @@ class YouTube:
     name = "youtube"
     platforms = ("youtube",)
     third_party = False
+    records_publication = True
 
     def __init__(self) -> None:
         self._token = ""
@@ -339,25 +387,49 @@ class YouTube:
         }
 
     def _status(self, request: PublishRequest, meta: dict) -> dict:
-        """The `status` part, which is where this API punishes a wrong guess."""
-        wanted = str(meta.get("visibility") or meta.get("privacyStatus") or "public").lower()
+        """The `status` part, which is where this API punishes a wrong guess.
+
+        `asked` is what the spec said and `wanted` is what gets sent, kept apart because
+        an *explicit* visibility that the mode cannot honour is a conflict to report,
+        while the same value arrived at by default is just the default.
+        """
+        asked = str(meta.get("visibility") or meta.get("privacyStatus") or "").strip().lower()
+        wanted = asked or "public"
         if wanted not in ("public", "unlisted", "private"):
             raise PublishError(f"privacyStatus must be public, unlisted or private, "
                                f"not {wanted!r}")
+        # Both spellings, as with category_id/categoryId above: the camelCase one is what
+        # the API calls it and what the older per-platform JSON files hold.
+        kids_key = "made_for_kids" if "made_for_kids" in meta else "madeForKids"
+        kids = meta.get(kids_key)
         status = {"privacyStatus": "private",
-                  "selfDeclaredMadeForKids": bool(meta.get("made_for_kids", False))}
+                  "selfDeclaredMadeForKids": False if kids is None
+                  else _flag(kids, kids_key)}
         if request.mode == DRAFT:
             print("YouTube has no draft: uploading as private. Publish it from Studio when "
                   "you have watched it, or re-run with mode schedule or now.")
+            if asked and asked != "private":
+                print(f"!! platforms.youtube.visibility is {asked!r}, but mode 'draft' "
+                      f"uploads private whatever it says. Use mode 'now' to upload {asked}.")
         elif request.mode == SCHEDULE:
             if not request.at:
                 raise PublishError("mode 'schedule' needs a timestamp")
+            # A scheduled upload goes up private and YouTube makes it *public* at
+            # publishAt; there is no "private at publishAt" and no scheduled unlisted.
+            # So `visibility: private` plus `mode: schedule` used to upload private, send
+            # the schedule, and hand someone who had asked for a private video a public
+            # one — silently, because privacyStatus in the payload did say private. The
+            # combination is refused rather than reinterpreted: dropping publishAt instead
+            # would unschedule a publish the user did ask for, which is the same bug
+            # pointing the other way.
+            if asked in ("private", "unlisted"):
+                raise PublishError(
+                    f"platforms.youtube.visibility is {asked!r} and mode is 'schedule', "
+                    f"but YouTube makes a scheduled video public at publishAt — it cannot "
+                    f"schedule one to become {asked}. Either drop the visibility key to "
+                    f"schedule it public, or use mode 'draft', which uploads it private "
+                    f"and leaves it for you to publish from Studio.")
             status["publishAt"] = _rfc3339(request.at, request.tz)
-            # privacyStatus stays private: with anything else the API returns 200, ignores
-            # publishAt entirely, and the video is live now instead of then.
-            if wanted == "unlisted":
-                print("!! YouTube cannot schedule an unlisted video — a scheduled upload "
-                      "goes public at publishAt. This one will be public, not unlisted.")
             print(f"private until {status['publishAt']}, then public")
         elif request.mode == NOW:
             status["privacyStatus"] = wanted
@@ -417,20 +489,27 @@ class YouTube:
                     raise PublishError(f"the upload finished with no video id: "
                                        f"{str(payload)[:200]}")
                 return video_id
-            if code not in RETRYABLE or attempt == MAX_ATTEMPTS:
+            if code not in RETRYABLE:
                 break
+            final = attempt == MAX_ATTEMPTS
             # A 308 is not a server complaint, it is "you stopped early", so there is
             # nothing to wait out before picking up where the bytes ran out.
-            if code != 308:
+            if code != 308 and not final:
                 wait = min(60, 3 * 2 ** (attempt - 1))
                 print(f"!! upload -> {code} {str(payload)[:120]}; "
                       f"retry {attempt}/{MAX_ATTEMPTS - 1} in {wait}s")
                 time.sleep(wait)
+            # The probe runs on the last attempt as well. Giving up without it skipped the
+            # one case resumption exists for — every byte arrived and only the response was
+            # lost — precisely when the run stops trying, so a video that was fully
+            # uploaded was reported as failed and uploaded again by the next run.
             offset, video_id = self._probe(session, size, token)
             if video_id:
                 # Every byte had arrived; only the answer was lost. Starting over here is
                 # what publishes the same video twice.
                 return video_id
+            if final:
+                break
             print(f"resuming at {offset / 1e6:.1f} of {size / 1e6:.1f} MB "
                   f"({100 * offset / size:.0f}%)")
         raise PublishError(f"upload failed at byte {offset} of {size}: "
@@ -451,28 +530,48 @@ class YouTube:
                         timeout=UPLOAD_TIMEOUT)
 
     def _probe(self, session: str, size: int, token: str) -> tuple[int, str]:
-        """Ask the session how much it holds. Returns (next byte to send, video id if done)."""
-        code, payload, headers = _call(
-            "PUT", session, label="resume probe", retryable=RETRYABLE - {308}, token=token,
-            data=b"", headers={"Content-Length": "0", "Content-Range": f"bytes */{size}"})
-        if code in (200, 201):
-            video_id = str(payload.get("id") or "")
-            if not video_id:
-                raise PublishError("the session says the upload is complete but names no "
-                                   "video; look for it in Studio before re-running")
-            return size, video_id
-        if code in (404, 410):
-            raise PublishError("the upload session is gone (YouTube keeps one for about a "
-                               "week): re-run to open a fresh one and upload again")
-        if code != 308:
-            raise PublishError(f"could not ask where the upload got to: "
-                               f"{_api_error(code, payload)}")
-        # `Range: bytes=0-N` counts the last byte stored, so the next one to send is N+1.
-        # No Range header at all means nothing arrived, which is a start from zero.
-        received = headers.get("Range", "")
-        if "-" not in received:
-            return 0, ""
-        try:
-            return int(received.rsplit("-", 1)[1]) + 1, ""
-        except ValueError as exc:
-            raise PublishError(f"could not read the resume position from {received!r}") from exc
+        """Ask the session how much it holds. Returns (next byte to send, video id if done).
+
+        A completed upload does not always answer `200` with an id. While YouTube finalises
+        one it answers `308` with a `Range` covering the whole file, which is not an error
+        and not something to resume: every byte is there and the id is moments away. That
+        answer used to come back as `(size, "")`, and the caller, assuming a finished
+        upload is always `200`, sent a PUT from byte `size` — an inverted `Content-Range`
+        the API rejects with 400. So an upload that had succeeded failed hard and was
+        uploaded a second time. The wait below is the whole fix: there is nothing to send,
+        so keep asking for the id.
+        """
+        waits = list(FINALISE_WAITS)
+        while True:
+            code, payload, headers = _call(
+                "PUT", session, label="resume probe", retryable=RETRYABLE - {308},
+                token=token, data=b"",
+                headers={"Content-Length": "0", "Content-Range": f"bytes */{size}"})
+            if code in (200, 201):
+                video_id = str(payload.get("id") or "")
+                if not video_id:
+                    raise PublishError("the session says the upload is complete but names "
+                                       "no video; look for it in Studio before re-running")
+                return size, video_id
+            if code in (404, 410):
+                raise PublishError("the upload session is gone (YouTube keeps one for about "
+                                   "a week): re-run to open a fresh one and upload again")
+            if code != 308:
+                raise PublishError(f"could not ask where the upload got to: "
+                                   f"{_api_error(code, payload)}")
+            offset = _resume_point(headers.get("Range", ""), size)
+            if offset < size:
+                return offset, ""
+            if not waits:
+                # Still unnamed after the waits. Reported as a failure, because it is one —
+                # but the message has to say that the bytes arrived: this is the one error
+                # in this backend where re-running is what publishes the video twice.
+                raise PublishError(
+                    f"all {size} bytes reached YouTube and the upload session has still "
+                    "not named the video. It is most likely processing and will appear in "
+                    "Studio: look there before re-running, because another run uploads it "
+                    "again.")
+            pause = waits.pop(0)
+            print(f"all {size / 1e6:.1f} MB are stored; waiting {pause}s for YouTube to "
+                  "finish the upload and name the video")
+            time.sleep(pause)

@@ -56,6 +56,10 @@ class LocalFolder:
     # real backend unless this one is named in publish.backends.
     platforms = ("*",)
     third_party = False
+    # Nothing is posted: this writes the video and the metadata that would
+    # have been sent. Recording it as published would mark the job done and
+    # the real publisher would skip it forever.
+    records_publication = False
 
     def __init__(self, directory: str | os.PathLike | None = None) -> None:
         self.directory = Path(directory).expanduser() if directory else None
@@ -154,10 +158,18 @@ def _write(video: Path, target: Path, meta_path: Path, payload: dict) -> None:
     # since last time belongs here. The name is `.publish.json` rather than `.json` so it
     # can never land on top of a spec. `default=str` because the spec is user data, and one
     # odd value in it must not be able to stop the file being written.
-    meta_path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n",
-        encoding="utf-8",
-    )
+    text = json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n"
+    # Through `.part` too, for the reason the video is. Written directly, a rewrite that
+    # died part-way — a full disk, a killed process — truncated the previous good sidecar,
+    # which cost the only record of what to post for a video possibly already copied out
+    # and replaced it with JSON nothing could parse.
+    partial = meta_path.with_name(meta_path.name + ".part")
+    try:
+        partial.write_text(text, encoding="utf-8")
+        os.replace(partial, meta_path)
+    finally:
+        if partial.exists():
+            partial.unlink()
 
 
 def _metadata(request: PublishRequest, platforms: tuple[str, ...], video: Path, target: Path,
@@ -195,7 +207,7 @@ def _block(platform: str, entry: dict, caption: str) -> dict:
         block = {
             "title": str(entry.get("title") or ""),
             "description": description,
-            "tags": list(entry.get("tags") or _hashtags(description)),
+            "tags": _tags(entry.get("tags"), description),
             # A publish request carries no visibility (it is a per-publisher setting), so
             # this is the spec's own value, else the public default the backends use.
             "visibility": str(entry.get("visibility") or "public"),
@@ -205,7 +217,7 @@ def _block(platform: str, entry: dict, caption: str) -> dict:
         text = str(entry.get("caption") or entry.get("description") or caption)
         # The hashtags are repeated on their own because on Instagram they are usually
         # pasted as a first comment rather than left in the caption.
-        block = {"caption": text, "hashtags": _hashtags(text)}
+        block = {"caption": text, "hashtags": _tags(entry.get("hashtags"), text)}
         required = ("caption",)
 
     for key, value in entry.items():
@@ -222,6 +234,32 @@ def _entry_for(spec: dict, platform: str) -> dict:
     platforms = spec.get("platforms")
     entry = platforms.get(platform) if isinstance(platforms, dict) else None
     return entry if isinstance(entry, dict) else {}
+
+
+def _tags(given: object, text: str) -> list[str]:
+    """The tags the spec names, else the ones already written into the text.
+
+    The caption branch computed this from the `#` matches in the text and wrote the result
+    over the spec's own list, and the `setdefault` pass afterwards cannot put a value back
+    under a key that is already present. So a caption carrying no `#` — exactly when a
+    separate list of hashtags is worth keeping — reached the sidecar as `hashtags: []`, and
+    the tags were gone from the one file that says what to post.
+
+    One string holding several is accepted because a hand-written spec says `tags: ai,
+    hindi` often enough, and `list()` on that is thirteen one-letter tags. A leading `#` is
+    dropped so a spec writing `#ai` and one writing `ai` read the same here, and so they
+    match what is extracted from the text.
+    """
+    if isinstance(given, str):
+        items: list = re.split(r"[,\s]+", given)
+    elif isinstance(given, (list, tuple)):
+        items = list(given)
+    else:
+        # Anything else goes through as a single tag rather than being dropped: a reader of
+        # this file can see an odd value and correct the spec, but cannot see an absence.
+        items = [given] if given else []
+    named = [str(item).strip().lstrip("#").strip() for item in items]
+    return list(dict.fromkeys(tag for tag in named if tag)) or _hashtags(text)
 
 
 def _hashtags(text: str) -> list[str]:

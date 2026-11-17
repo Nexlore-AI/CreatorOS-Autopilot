@@ -6,8 +6,8 @@ be reused, swapped or tested. This is the most general replacement: every blog, 
 subreddit and YouTube channel already publishes a feed, which makes this the one source
 most users will ever configure and the one that has to be dull and reliable.
 
-Two things make a hand-rolled feed reader go quietly wrong, and both are the reason this
-module is longer than it looks like it should be.
+Three things make a hand-rolled feed reader go quietly wrong, and they are the reason
+this module is longer than it looks like it should be.
 
 The first is Atom. Its entries are the same shape as RSS's items but they live in a
 namespace, so a reader written against RSS 2.0 finds no `<item>` anywhere and returns an
@@ -17,6 +17,10 @@ YouTube's among them, so elements are matched on local name here.
 The second is dates. RSS carries RFC 822, Atom carries ISO 8601, and plenty of feeds carry
 something naive or nothing at all. `core.schedule` refuses naive datetimes and is right
 to, so every timestamp that leaves here is timezone-aware or absent.
+
+The third is a feed that has stopped being one. A moved URL answers 200 with a sitemap or
+a styled error page, both well-formed XML containing no `<item>` — so the root element is
+checked rather than inferred from what the scan happened to find.
 
 `feedparser` would do all of this. It would also be a fourth dependency, and the part that
 matters is a page of standard library.
@@ -29,9 +33,10 @@ import html
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from ... import __version__
 from ...interfaces.availability import Availability
@@ -45,6 +50,12 @@ ACCEPT = "application/atom+xml, application/rss+xml, application/xml;q=0.9, text
 
 MAX_BYTES = 8 * 1024 * 1024        # a URL that turns out to be a video should fail, not download
 DEFAULT_SUMMARY_CHARS = 400
+
+#: The three roots a feed is allowed to have: RSS 2.0, Atom, RSS 1.0. Matched on local
+#: name and lowercased, because RSS 1.0's is `rdf:RDF`.
+FEED_ROOTS = ("rss", "feed", "rdf")
+#: xml:base, which Atom links are relative to when the feed sets it.
+XML_BASE = "{http://www.w3.org/XML/1998/namespace}base"
 
 _TAGS = re.compile(r"<[^>]*>")
 _USERINFO = re.compile(r"//[^/@]*@")
@@ -107,9 +118,13 @@ class RSS:
         """Items from every feed, newest first.
 
         One unreachable or malformed feed does not take out the rest; its reason goes to
-        `self.problems` and the others are still returned. If *every* feed failed that is
-        a network failure rather than a quiet week, and it raises — a source that returns
-        `[]` when it reached nothing is how a pipeline makes no videos and says nothing.
+        `self.problems` and the others are still returned. Only when *no* feed could be
+        read at all does this raise — a source that returns `[]` when it reached nothing
+        is how a pipeline makes no videos and says nothing. A feed that was read and had
+        nothing to say is not a failure and is not counted as one.
+
+        `limit` is a ceiling, and zero or less is a ceiling of zero: callers work theirs
+        out as `cap - len(already_have)`, so asking for nothing has to get nothing.
         """
         if since is not None and since.tzinfo is None:
             raise ValueError("since must be timezone-aware")
@@ -120,6 +135,7 @@ class RSS:
             )
 
         self.problems = []
+        reached = 0
         found: dict[str, Item] = {}
         for feed in self.feeds:
             try:
@@ -127,6 +143,7 @@ class RSS:
             except Exception as exc:
                 self.problems.append(f"{_redact(feed)}: {_why(exc)}")
                 continue
+            reached += 1
             for item in harvest:
                 # The same post shows up in both a site feed and one of its category feeds
                 # often enough to collapse here rather than leaving every caller to notice.
@@ -134,8 +151,11 @@ class RSS:
                 seen = found.get(item.key())
                 if seen is None or (seen.published is None and item.published is not None):
                     found[item.key()] = item
-        if self.problems and not found:
-            raise FeedError("every feed failed — " + "; ".join(self.problems))
+        if self.problems and not reached:
+            # This used to test `not found`, which asks a different question. One live
+            # feed having a genuinely quiet day beside one stale URL then raised "every
+            # feed failed": untrue, and it buried the single feed that really was broken.
+            raise FeedError("no feed could be read — " + "; ".join(self.problems))
 
         items = list(found.values())
         needle = query.strip().lower()
@@ -156,7 +176,9 @@ class RSS:
         dated.sort(key=lambda i: i.published, reverse=True)
 
         ordered = dated + undated
-        return ordered[:limit] if limit > 0 else ordered
+        # `limit <= 0` used to mean "no ceiling", so a caller whose budget was already
+        # spent asked for nothing and was handed the whole feed to render.
+        return ordered[:limit] if limit > 0 else []
 
     def _read(self, feed: str) -> list[Item]:
         if not _is_http(feed):
@@ -167,23 +189,34 @@ class RSS:
             feed, headers={"User-Agent": USER_AGENT, "Accept": ACCEPT})
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             raw = response.read(MAX_BYTES + 1)
+            # Relative links resolve against where the feed was actually served from, so
+            # a feed that has moved host resolves against the redirect target rather than
+            # the address still sitting in creatoros.yaml.
+            landed = response.geturl() or feed
         if len(raw) > MAX_BYTES:
             raise FeedError(f"over {MAX_BYTES // (1024 * 1024)} MiB, so probably not a feed")
 
         root = _parse(raw)
+        kind = _local(root.tag)
+        if kind.lower() not in FEED_ROOTS:
+            # Only the scan for item/entry used to stand between a web page and a report
+            # of success: a feed replaced by an HTML error page or a sitemap returned []
+            # and raised nothing, which reads exactly like a fortnight of quiet days.
+            raise FeedError(f"200 but not a feed: root element is <{kind or '?'}>")
         channel = _child(root, "channel")           # RSS nests one; Atom's root is the feed
         title = _plain(_text_of(_child(root if channel is None else channel, "title")), 80)
+        base = landed if _is_http(landed) else feed
         items = []
-        for node in root.iter():
-            if _local(node.tag) in ("item", "entry"):
-                item = self._item(node, feed, title)
-                if item is not None:
-                    items.append(item)
+        for node, item_base in _entries(root, base):
+            item = self._item(node, feed, title, item_base)
+            if item is not None:
+                items.append(item)
         return items
 
-    def _item(self, node: ET.Element, feed: str, feed_title: str) -> Item | None:
+    def _item(self, node: ET.Element, feed: str, feed_title: str,
+              base: str) -> Item | None:
         title = _plain(_text_of(_child(node, "title")), 300)
-        url = _link(node)
+        url = _link(node, base)
         if not title and not url:
             return None
         return Item(
@@ -276,12 +309,62 @@ def _first_text(node: ET.Element, *names: str) -> str:
     return ""
 
 
-def _link(node: ET.Element) -> str:
-    """The item's own page.
+def _entries(node: ET.Element, base: str) -> Iterator[tuple[ET.Element, str]]:
+    """Every item or entry in document order, each with the xml:base in force on it.
+
+    ElementTree elements have no parent, so the base is carried down the tree instead of
+    looked up from the element: Atom lets a feed set xml:base on the feed, on the entry,
+    or on neither, and a relative link is relative to the nearest one.
+    """
+    here = _rebase(base, node)
+    if _local(node.tag) in ("item", "entry"):
+        yield node, here
+        return
+    for child in list(node):
+        yield from _entries(child, here)
+
+
+def _rebase(base: str, node: ET.Element) -> str:
+    """`base` as this element changes it, which is usually not at all."""
+    attr = (node.get(XML_BASE) or "").strip()
+    if not attr:
+        return base
+    return _resolve(base, attr) or base
+
+
+def _resolve(base: str, reference: str) -> str:
+    try:
+        return urllib.parse.urljoin(base, reference)
+    except ValueError:      # a malformed authority, e.g. "http://[::1" — not a URL
+        return ""
+
+
+def _absolute(base: str, reference: str) -> str:
+    """`reference` as an absolute http(s) URL, or "" when it cannot be one.
+
+    Resolution happens before the scheme check rather than instead of it, so `mailto:`
+    and `javascript:` are still refused, and an xml:base pointing somewhere odd cannot
+    turn a relative href into a `file://` read.
+    """
+    if not reference:
+        return ""
+    resolved = _resolve(base, reference) if base else reference
+    return resolved if _is_http(resolved) else ""
+
+
+def _link(node: ET.Element, base: str) -> str:
+    """The item's own page, as an absolute http(s) URL.
 
     RSS puts it in `<link>`'s text, Atom in a `href` attribute — and Atom reuses that
     element for machine links (`rel="self"`, the comments feed, enclosures), so `rel` has
     to be read instead of taking the first `href` and hoping.
+
+    An Atom href is a URI reference, so relative is legal and common, and it used to be
+    taken verbatim: two unrelated sites whose newest post sat at `/2026/01/hello.html`
+    produced the same `Item.key()`, and dedup across sources threw a real story away. An
+    RSS `<link>`, which the spec requires to be absolute, is still only accepted absolute
+    — resolving scheme-less text like "example.com/post" against the feed would invent a
+    URL on the wrong host instead of falling through to the permalink guid below.
     """
     other = ""
     for child in list(node):
@@ -290,7 +373,7 @@ def _link(node: ET.Element) -> str:
         text = (child.text or "").strip()
         if _is_http(text):
             return text
-        href = (child.get("href") or "").strip()
+        href = _absolute(base, (child.get("href") or "").strip())
         if not href:
             continue
         if (child.get("rel") or "alternate").strip().lower() == "alternate":
