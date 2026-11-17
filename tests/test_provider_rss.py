@@ -27,7 +27,7 @@ class _Feeds:
         class Handler(http.server.BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.0"
 
-            def do_GET(self) -> None:          # noqa: N802 - http.server's spelling
+            def do_GET(self) -> None:
                 found = routes.get(self.path)
                 if found is None:
                     self.send_error(404, "Not Found")

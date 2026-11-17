@@ -20,19 +20,16 @@ Modes come from PUBLISH_MODE (default draft):
 Reads ZERNIO_API_KEY from the environment. Source config.env and .env first.
 """
 import argparse
-import hashlib
 import json
 import os
 import sys
 import time
-import urllib.error
-import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-from . import zernio as pz                       # spec + metadata helpers
-from ._api import LIMITS, ZernioAPI, ZernioError
+from . import zernio as pz  # spec + metadata helpers
+from ._api import LIMITS, ZernioAPI
 
 _api = ZernioAPI()
 
@@ -342,7 +339,7 @@ def main():
                 ledger_write({"ts": stamp, "file": rp, "platform": p, "mode": a.mode,
                               "ok": False, "error": msg})
         elif res.get("duplicate"):
-            print(f"    duplicate within 24h - treating as already posted")
+            print("    duplicate within 24h - treating as already posted")
             skipped += 1
             for p in pending:
                 ledger_write({"ts": stamp, "file": rp, "platform": p, "mode": a.mode,

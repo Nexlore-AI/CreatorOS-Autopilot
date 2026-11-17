@@ -40,7 +40,7 @@ class LanguageMix:
         self.low, self.high = low, high
 
     @classmethod
-    def from_brand(cls, kit) -> "LanguageMix | None":
+    def from_brand(cls, kit) -> LanguageMix | None:
         """Build the gate from a brand's `language` block, or None if it has no mix.
 
         This is what makes Hinglish a setting rather than a fact about the pipeline. The

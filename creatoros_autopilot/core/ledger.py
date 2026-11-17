@@ -25,9 +25,9 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterator
 
 SCHEMA = 2
 
@@ -84,7 +84,7 @@ class Ledger:
                     continue
                 if not isinstance(data, dict) or "job_id" not in data:
                     continue
-                known = {f for f in Entry.__dataclass_fields__}
+                known = set(Entry.__dataclass_fields__)
                 extra = {k: v for k, v in data.items() if k not in known}
                 row = {k: v for k, v in data.items() if k in known}
                 row.setdefault("platform", "")
@@ -137,7 +137,8 @@ class Ledger:
 
 
 # ------------------------------------------------------------------ legacy import
-def read_legacy(path: str | os.PathLike, job_id_for: callable | None = None) -> list[Entry]:
+def read_legacy(path: str | os.PathLike,
+                job_id_for: Callable[[str], str | None] | None = None) -> list[Entry]:
     """Rows from one of the two old ledger formats, re-keyed onto job ids.
 
     Used by the Phase 6 cutover. Both old formats identified a video by path, so the

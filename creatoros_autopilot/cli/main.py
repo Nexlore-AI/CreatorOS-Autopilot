@@ -141,7 +141,8 @@ def cmd_run(args) -> int:
 
 
 def cmd_status(args) -> int:
-    from ..core import pipeline, schedule as sched
+    from ..core import pipeline
+    from ..core import schedule as sched
     from ..core.ledger import Ledger
 
     settings = _settings(args)
@@ -162,8 +163,8 @@ def cmd_status(args) -> int:
     status_file = job_dir / "STATUS.md"
     state = "not run"
     if status_file.is_file():
-        state = next((l for l in status_file.read_text(encoding="utf-8").splitlines()
-                      if l.startswith("state:")), "unknown")
+        lines = status_file.read_text(encoding="utf-8").splitlines()
+        state = next((line for line in lines if line.startswith("state:")), "unknown")
     print(f"agent        : {state}")
     print(f"rendered     : {len(videos)} of {settings.content.videos_per_day}")
     for slot, video in videos:

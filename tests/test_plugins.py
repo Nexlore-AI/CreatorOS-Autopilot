@@ -14,7 +14,13 @@ import pytest
 from creatoros_autopilot import plugins
 from creatoros_autopilot.core import narrate
 from creatoros_autopilot.interfaces import (
-    Availability, Gate, LLM, Publisher, PublishRequest, ResearchSource, Style, TTS,
+    LLM,
+    TTS,
+    Availability,
+    Gate,
+    Publisher,
+    ResearchSource,
+    Style,
 )
 
 from .conftest import PACKAGE, code_only, tone_bytes
@@ -173,7 +179,7 @@ class TestAcceptance:
                 "an unchanged line must not be re-synthesised"
 
             spec["scenes"] = spec["scenes"][:1]
-            third = narrate.narrate(spec, spec_path, backend)
+            narrate.narrate(spec, spec_path, backend)
             assert not (tmp_path / "01_t_vo" / "02.mp3").exists(), \
                 "a removed scene's clip must be cleaned up"
         finally:
@@ -186,7 +192,8 @@ class TestAcceptance:
             name, paid = "a", False
             def available(self): return Availability.yes()
             def synthesize(self, text, out_path, **k):
-                Path(out_path).write_bytes(tone_bytes(1.0)); return Path(out_path)
+                Path(out_path).write_bytes(tone_bytes(1.0))
+                return Path(out_path)
             def voices(self): return []
 
         class B(A):

@@ -27,7 +27,7 @@ from pathlib import Path
 from .. import plugins
 from ..core import brand as brand_mod
 from ..core import settings as settings_mod
-from ..runtime import default_workspace, user_config_dir
+from ..runtime import default_workspace
 
 #: Keys a provider needs, so the wizard can offer to collect them. Names only — the wizard
 #: never holds a default value for a secret.
@@ -114,7 +114,8 @@ class Console:
 
 def _free(kind: str) -> list:
     """Plugin names of this kind that need no key, cheapest-to-try first."""
-    free, paid = [], []
+    free: list[str] = []
+    paid: list[str] = []
     for name in plugins.names(kind):
         try:
             backend = plugins.load(kind, name)

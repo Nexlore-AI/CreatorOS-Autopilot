@@ -45,10 +45,17 @@ VISUAL TYPES (inside a section)
   steps      items*[str] (max 5)  vertical pipeline with arrows
   compare    left*{title, items[]}, right*{title, items[]}
 """
-import json, math, os, random, subprocess, sys, wave
+import itertools
+import math
+import os
+import random
+import subprocess
+import sys
+import wave
 from multiprocessing import Pool
+
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from ..core import brand as brand_mod
 from ..core import media
@@ -152,7 +159,7 @@ def C(c, a): return tuple(c) + (int(255 * clamp(a)),)
 def lerp(c1, c2, k): return tuple(int(c1[i] + (c2[i] - c1[i]) * k) for i in range(3))
 def gcol(u):
     u = clamp(u)
-    for (a, ca), (b, cb) in zip(GRAD, GRAD[1:]):
+    for (a, ca), (b, cb) in itertools.pairwise(GRAD):
         if u <= b: return lerp(ca, cb, (u - a) / (b - a))
     return GRAD[-1][1]
 
@@ -564,7 +571,7 @@ def sc_hook(im, d, t, D, A, sc):
             glow_dot(im, X0 + 95, y + 330, 120, CYAN, 0.18 * A * pb)
             grad_text(im, (X0, y + 160), big, fb, A * clamp(pb * 2))
             if sc.get("big_suffix"):
-                bwid = tw(d, big, F("black", int(300 if len(big) <= 2 else 200))) + 30
+                bwid = tw(d, big, F("black", 300 if len(big) <= 2 else 200)) + 30
                 text(d, (X0 + bwid, y + 300 + 30 * (1 - ease(pb))), sc["big_suffix"], fit(d, sc["big_suffix"], "black", 128, W - 2 * X0 - bwid), WHITE, A * ease(pb))
 
 def sc_stack(im, d, t, D, A, sc):
@@ -769,7 +776,7 @@ def run(mode, spec_path, out=None, kit=None):
     if mode == "preview":
         init(); n = len(durs); cols = 4; tw_, th_ = 360, 640
         sheet = Image.new("RGB", (cols * tw_, ((n + cols - 1) // cols) * th_))
-        for k, (D, g0) in enumerate(zip(durs, offs)):
+        for k, (D, g0) in enumerate(zip(durs, offs, strict=True)):
             sheet.paste(frame(spec, k, D * 0.92, D, g0, total).resize((tw_, th_)), ((k % cols) * tw_, (k // cols) * th_))
         out = out or (base + ".preview.jpg")
         os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
@@ -778,7 +785,7 @@ def run(mode, spec_path, out=None, kit=None):
     os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
     work = base + "_scenes"; os.makedirs(work, exist_ok=True)
     jobs = [(spec, k, D, g0, total, os.path.join(work, f"{k + 1:02d}.mp4"), BRAND)
-            for k, (D, g0) in enumerate(zip(durs, offs))]
+            for k, (D, g0) in enumerate(zip(durs, offs, strict=True))]
     with Pool(min(os.cpu_count() or 4, 8)) as pool:
         for k in pool.imap_unordered(_render, sorted(jobs, key=lambda j: -j[2])): print("scene", k + 1, "done", flush=True)
     with open(os.path.join(work, "list.txt"), "w") as f:

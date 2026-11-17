@@ -73,7 +73,8 @@ def job_id(spec: dict, path: str | os.PathLike | None = None) -> str:
 
 def validate_render(spec: dict, path: str | os.PathLike | None = None) -> list[str]:
     """Raise on anything that stops a render. Return non-fatal warnings."""
-    problems, warnings = [], []
+    problems: list[str] = []
+    warnings: list[str] = []
     scenes = spec.get("scenes")
     if not isinstance(scenes, list) or not scenes:
         raise SpecError(["a spec needs a non-empty 'scenes' list"], str(path) if path else None)
@@ -123,15 +124,18 @@ def validate_publish(spec: dict, platforms: list[str], path: str | os.PathLike |
         if not isinstance(entry, dict):
             problems.append(f"platforms.{platform} must be an object")
             continue
-        needed = ()
+        needed: tuple = ()
         if requires is not None:
             try:
-                needed = requires(platform) or ()
+                needed = tuple(requires(platform) or ())
             except Exception:
                 needed = ()
         for key in needed:
-            if not str(entry.get(key) or "").strip() if isinstance(entry.get(key), str) \
-                    else not entry.get(key):
+            value = entry.get(key)
+            # A whitespace-only caption is as useless as a missing one, and that is the
+            # case this actually guards: a Reel with a blank caption gets no reach.
+            empty = not str(value).strip() if isinstance(value, str) else not value
+            if empty:
                 problems.append(f"platforms.{platform}.{key} is missing or empty")
     if problems:
         raise SpecError(problems, str(path) if path else None)

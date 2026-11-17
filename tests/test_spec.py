@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Spec validation, split so that rendering never needs a publishing account."""
-import json
 
 import pytest
 

@@ -62,7 +62,7 @@ def tone_bytes(seconds: float = 1.0) -> bytes:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "t.mp3"
         subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-f", "lavfi",
-                        "-i", f"anullsrc=r=44100:cl=mono", "-t", f"{key}",
+                        "-i", "anullsrc=r=44100:cl=mono", "-t", f"{key}",
                         "-c:a", "libmp3lame", "-b:a", "64k", str(out)], check=True)
         _TONE_CACHE[key] = out.read_bytes()
     return _TONE_CACHE[key]

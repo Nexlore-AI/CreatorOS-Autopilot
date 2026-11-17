@@ -16,7 +16,6 @@ loops and parsing "#0ED1D3" thirty times a second has no purpose.
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
@@ -79,7 +78,7 @@ class Palette:
         raise AttributeError(f"the palette has no colour {name!r}")
 
     @classmethod
-    def build(cls, overrides: dict | None = None) -> "Palette":
+    def build(cls, overrides: dict | None = None) -> Palette:
         merged = {**DEFAULT_PALETTE, **(overrides or {})}
         unknown = set(merged) - set(DEFAULT_PALETTE)
         if unknown:
@@ -162,7 +161,7 @@ def find(name: str, explicit=None):
 
 
 def available(explicit=None) -> list:
-    found = {}
+    found: dict = {}
     for directory in search_path(explicit):
         if directory.is_dir():
             for path in sorted(directory.glob("*.y*ml")):

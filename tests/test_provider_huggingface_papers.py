@@ -76,7 +76,7 @@ class _Daily:
         class Handler(http.server.BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.0"
 
-            def do_GET(self) -> None:          # noqa: N802 - http.server's spelling
+            def do_GET(self) -> None:
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 raw = (query.get("date") or [""])[0]
                 day = dt.date.fromisoformat(raw) if raw else None
