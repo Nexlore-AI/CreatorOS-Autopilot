@@ -1,0 +1,35 @@
+# Claro — una idea al día, en español.
+#
+# The third preset exists to test the part the first two cannot: a channel in a language
+# that is not English and does not mix. Its brand declares `language.primary: es` and no
+# secondary, so the language-mix gate has nothing to measure and skips itself rather than
+# failing a configuration that is perfectly correct.
+
+workspace: ""
+timezone: Europe/Madrid
+style: nexlore-v3
+brand: brand.yaml
+
+content:
+  videos_per_day: 1
+  run_at: "07:00"
+  pillars_dir: pillars
+
+agent:
+  provider: claude_code
+
+tts:
+  backend: piper
+  voice_id: es_ES-sharvard-medium
+
+publish:
+  mode: draft
+  platforms: [youtube]
+  backends: [youtube]
+  offset_days: 1
+  post_times: ["09:00"]
+  youtube:
+    visibility: public
+    category_id: "27"        # Education
+
+gates: []

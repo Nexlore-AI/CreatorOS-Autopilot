@@ -31,8 +31,21 @@ import time
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import publish_zernio as pz  # noqa: E402  (same folder; provides req() and API)
+from . import zernio as pz                       # spec + metadata helpers
+from ._api import LIMITS, ZernioAPI, ZernioError
+
+_api = ZernioAPI()
+
+
+def _req(method, url, key=None, body=None, raw=None, ctype=None, idem=None):
+    """The old `publish_zernio.req` signature, backed by the one shared client.
+
+    These three tools each used to carry their own copy of the HTTP layer. They now call
+    `_api`, which is where auth, backoff and the "a dropped socket is retryable" rule live.
+    `key` is ignored: the client reads ZERNIO_API_KEY itself.
+    """
+    return _api.call(method, url, body=body, raw=raw, ctype=ctype, idem=idem,
+                     authenticated=raw is None, label=url)
 
 LEDGER = os.path.join(HERE, "publish_ledger.jsonl")
 STOP_CONSECUTIVE = 2   # two in a row means something systemic; stop before the cooldown
@@ -78,12 +91,12 @@ def fetch_posts(key, status=None):
     """Posts walked by cursor. Sort by creation: the default scheduled-desc hid a batch."""
     out, cursor = [], None
     while True:
-        url = f"{pz.API}/posts?sortBy=created-asc&limit=100"
+        url = f"{_api.base}/posts?sortBy=created-asc&limit=100"
         if status:
             url += "&status=" + status
         if cursor:
             url += "&cursor=" + cursor
-        st, d = pz.req("GET", url, key)
+        st, d = _req("GET", url, key)
         if st != 200:
             sys.exit(f"GET /posts -> {st} {str(d)[:300]}")
         posts = d if isinstance(d, list) else (d.get("posts") or d.get("data") or [])
@@ -158,7 +171,7 @@ def wait_terminal(key, pid, timeout=240, interval=15):
     deadline = time.time() + timeout
     last = {}
     while True:
-        st, d = pz.req("GET", f"{pz.API}/posts/{pid}", key)
+        st, d = _req("GET", f"{_api.base}/posts/{pid}", key)
         if st == 200:
             p = (d or {}).get("post", d) if isinstance(d, dict) else {}
             if isinstance(p, dict):
@@ -197,7 +210,7 @@ def promote(key, post, dry):
     if dry:
         return {"dry": True, "body": body}
 
-    st, res = pz.req("PUT", f"{pz.API}/posts/{pid}", key=key, body=body)
+    st, res = _req("PUT", f"{_api.base}/posts/{pid}", key=key, body=body)
     if st not in (200, 201, 207):
         return {"http": st, "ok": False,
                 "error": (res.get("error") if isinstance(res, dict) else None) or str(res)[:300],

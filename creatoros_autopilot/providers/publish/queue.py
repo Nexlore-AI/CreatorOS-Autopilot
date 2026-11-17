@@ -31,10 +31,23 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import publish_zernio as pz  # noqa: E402  (same folder; provides spec + metadata helpers)
+from . import zernio as pz                       # spec + metadata helpers
+from ._api import LIMITS, ZernioAPI, ZernioError
 
-API = pz.API
+_api = ZernioAPI()
+
+
+def _req(method, url, key=None, body=None, raw=None, ctype=None, idem=None):
+    """The old `publish_zernio.req` signature, backed by the one shared client.
+
+    These three tools each used to carry their own copy of the HTTP layer. They now call
+    `_api`, which is where auth, backoff and the "a dropped socket is retryable" rule live.
+    `key` is ignored: the client reads ZERNIO_API_KEY itself.
+    """
+    return _api.call(method, url, body=body, raw=raw, ctype=ctype, idem=idem,
+                     authenticated=raw is None, label=url)
+
+API = _api.base
 LEDGER = os.path.join(HERE, "publish_ledger.jsonl")
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -96,7 +109,7 @@ def call(method, url, key=None, body=None, raw=None, ctype=None, idem=None, labe
     """One HTTP call with backoff on transient failures. Returns (status, payload)."""
     last = (None, "no attempt")
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        st, payload = pz.req(method, url, key=key, body=body, raw=raw, ctype=ctype, idem=idem)
+        st, payload = _req(method, url, key=key, body=body, raw=raw, ctype=ctype, idem=idem)
         if st not in RETRYABLE:
             return st, payload
         last = (st, payload)
@@ -162,7 +175,7 @@ def publish_one(vid, accounts, platforms, mode, post_times, day, dry):
     tags = yt_meta.get("tags") or pz.derive_tags(caption)
 
     for plat in platforms:
-        lim = pz.LIMITS.get(plat, {})
+        lim = LIMITS.get(plat, {})
         body = ig_caption if plat == "instagram" else yt_description
         if lim.get("bytes") and size > lim["bytes"]:
             return {"fatal": f"{size/1e6:.0f} MB exceeds {plat} limit"}
@@ -194,15 +207,15 @@ def publish_one(vid, accounts, platforms, mode, post_times, day, dry):
         e = {"platform": plat, "accountId": accounts[plat]}
         if plat == "youtube":
             e["platformSpecificData"] = {
-                "title": title[:pz.LIMITS["youtube"]["title"]],
+                "title": title[:LIMITS["youtube"]["title"]],
                 "visibility": os.environ.get("YT_VISIBILITY", "public"),
                 "categoryId": pz.YT_CATEGORY_SCI_TECH,
                 "madeForKids": False,
                 "containsSyntheticMedia": True,   # AI narration
             }
-            e["customContent"] = yt_description[:pz.LIMITS["youtube"]["caption"]]
+            e["customContent"] = yt_description[:LIMITS["youtube"]["caption"]]
         else:
-            e["customContent"] = ig_caption[:pz.LIMITS["instagram"]["caption"]]
+            e["customContent"] = ig_caption[:LIMITS["instagram"]["caption"]]
         entries.append(e)
 
     post = {

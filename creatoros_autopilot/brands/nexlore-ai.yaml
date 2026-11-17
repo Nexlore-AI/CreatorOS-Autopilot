@@ -1,0 +1,43 @@
+# The Nexlore AI brand kit — the look in the example renders.
+#
+# This is what used to be welded into the renderer: the wordmark drawn into every frame,
+# the icon opened unconditionally at startup, the palette and font map as module constants.
+# It is now one file among several, and the renderer has no idea it is special.
+
+name: Nexlore AI
+tagline: One AI idea. Explained daily.
+logo: assets/nexlore-icon-512.png
+cta: Follow Nexlore AI
+
+palette:
+  background: "#0B0A1C"
+  background_low: "#120E33"
+  accent: "#0ED1D3"       # cyan — used once per scene, for the one word that matters
+  accent_2: "#298AB4"
+  accent_3: "#4C52B2"
+  accent_4: "#580CA3"
+  glow_top: "#0B4F63"
+  glow_bottom: "#3A1478"
+
+fonts:
+  black: InterDisplay-Black.otf
+  bold: Inter-Bold.otf
+  semi: Inter-SemiBold.otf
+  reg: Inter-Regular.otf
+  mono: DejaVuSansMono-Bold.ttf
+
+# Hinglish: Hindi grammar with roughly 45% English vocabulary, written in Devanagari.
+#
+# The script matters and is not a language choice: Latin-script English words make
+# ElevenLabs switch to an English accent mid-sentence, so they are spelled in Devanagari
+# too. That raises how much English the listener HEARS without changing the voice.
+#
+# The 38–55% band is empirical. Rewriting two 2026-11-16 scenes as naturally as possible
+# landed at 44% and 39%, and that is about the ceiling — the Hindi skeleton is the grammar,
+# and replacing it to chase a higher number stops sounding like speech.
+language:
+  primary: hi
+  secondary: en
+  ratio: 0.45
+  tolerance: 0.085
+  script: Devanagari

@@ -30,8 +30,17 @@ class TestPackageData:
                      "Inter-SemiBold.otf", "DejaVuSansMono-Bold.ttf"):
             assert (Path(engine.FONTS) / name).is_file(), name
 
-    def test_the_brand_icon_ships_with_the_package(self):
-        assert (Path(engine.ASSETS) / "nexlore-icon-512.png").is_file()
+    def test_the_engine_ships_no_brand_asset(self):
+        """The renderer used to open `nexlore-icon-512.png` unconditionally at startup,
+        so any brand without that exact file crashed before the first frame. A logo now
+        belongs to a brand kit, and having none is a supported answer."""
+        assert not Path(engine.ASSETS).is_dir() or not list(Path(engine.ASSETS).glob("*.png"))
+
+    def test_a_brand_kit_carries_its_own_logo(self):
+        from creatoros_autopilot.core import brand as brand_mod
+
+        kit = brand_mod.load("nexlore-ai")
+        assert kit.logo and kit.logo.is_file()
 
     def test_the_music_library_does_not(self):
         """Music is user content from the workspace. Bundling it would mean shipping

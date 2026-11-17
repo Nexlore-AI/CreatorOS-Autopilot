@@ -19,6 +19,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 
+from .. import plugins
 from ..core import media, settings as settings_mod
 from ..core.schedule import zone
 from ..runtime import os_name
@@ -116,50 +117,126 @@ def _secret(name: str) -> bool:
     return bool(os.environ.get(name, "").strip())
 
 
+def _plugin(kind: str, name: str, label: str, *, hint: str = "") -> Check:
+    """Ask a plugin whether it can run, and render its own answer.
+
+    Nothing in this file knows what an ElevenLabs key looks like or where Piper's models
+    live. It used to: there was an `if backend == "elevenlabs"` branch here, which meant
+    every new provider needed doctor edited too. A provider's `available()` is the single
+    place that knows how it fails and how to fix it.
+    """
+    if name in ("", "none"):
+        return Check(label, WARN, f"{kind} is disabled", hint, required=False)
+    try:
+        backend = plugins.load(kind, name)
+    except plugins.PluginError as exc:
+        return Check(label, FAIL, str(exc).split(".")[0],
+                     f"installed: {', '.join(plugins.names(kind)) or '(none)'}", required=False)
+    try:
+        ready = backend.available()
+    except Exception as exc:
+        return Check(label, FAIL, f"{name}: {type(exc).__name__}: {exc}", required=False)
+    paid = " · paid" if getattr(backend, "paid", False) else ""
+    detail = f"{name}{paid}" + (f" — {ready.detail}" if ready.detail else "")
+    return Check(label, OK if ready.ok else FAIL, detail, ready.fix, required=False)
+
+
+def _installed(kind: str) -> Check:
+    found = plugins.names(kind)
+    return Check(f"{kind} plugins", OK if found else WARN,
+                 ", ".join(found) or "none installed", required=False)
+
+
 def _narration(settings) -> list[Check]:
-    backend = settings.tts.backend
-    if backend in ("", "none"):
-        return [Check("narration", WARN, "tts.backend is none — scenes render at minimum duration",
-                      "set tts.backend: elevenlabs and add ELEVENLABS_API_KEY to .env", required=False)]
-    if backend == "elevenlabs":
-        out = [Check("narration", OK, "elevenlabs", required=False)]
-        out.append(Check("ELEVENLABS_API_KEY", OK if _secret("ELEVENLABS_API_KEY") else FAIL,
-                         "set" if _secret("ELEVENLABS_API_KEY") else "missing",
-                         "add ELEVENLABS_API_KEY to .env beside creatoros.yaml", required=False))
-        out.append(Check("tts.voice_id", OK if settings.tts.voice_id else FAIL,
-                         settings.tts.voice_id or "not set",
+    out = [_installed(plugins.TTS),
+           _plugin(plugins.TTS, settings.tts.backend, "narration",
+                   hint="set tts.backend: piper for a free local voice")]
+    if settings.tts.backend not in ("", "none") and not settings.tts.voice_id:
+        out.append(Check("tts.voice_id", WARN, "not set",
                          "set tts.voice_id in creatoros.yaml", required=False))
-        return out
-    return [Check("narration", FAIL, f"unknown tts.backend {backend!r}",
-                  "Phase 1 ships 'elevenlabs' and 'none'; more arrive in Phase 2", required=False)]
+    return out
 
 
 def _publishing(settings) -> list[Check]:
+    out = [_installed(plugins.PUBLISH)]
     platforms = settings.publish.platforms
     if not platforms:
-        return [Check("publishing", WARN, "publish.platforms is empty — videos render but nothing posts",
-                      "add platforms to creatoros.yaml when you are ready to publish", required=False)]
-    out = [Check("publishing", OK, f"{', '.join(platforms)} · mode={settings.publish.mode} "
-                 f"· offset={settings.publish.offset_days}d", required=False)]
-    out.append(Check("ZERNIO_API_KEY", OK if _secret("ZERNIO_API_KEY") else FAIL,
-                     "set" if _secret("ZERNIO_API_KEY") else "missing",
-                     "add ZERNIO_API_KEY to .env, or publish by hand", required=False))
+        out.append(Check("publishing", WARN,
+                         "publish.platforms is empty — videos render but nothing posts",
+                         "add platforms to creatoros.yaml, or use local_folder to write "
+                         "them out with their metadata", required=False))
+        return out
+    out.append(Check("publishing", OK, f"{', '.join(platforms)} · mode={settings.publish.mode} "
+                     f"· offset={settings.publish.offset_days}d", required=False))
+    # Each platform is checked through whichever backend would actually handle it, so what
+    # doctor reports is what a run would do rather than an assumption about Zernio.
+    for platform in platforms:
+        try:
+            backend = plugins.publisher_for(platform, settings.publish.backends)
+        except plugins.PluginError as exc:
+            out.append(Check(f"  {platform}", FAIL, str(exc), required=False))
+            continue
+        ready = backend.available()
+        out.append(Check(f"  {platform}", OK if ready.ok else FAIL,
+                         f"via {backend.name}" + (f" — {ready.detail}" if ready.detail else ""),
+                         ready.fix, required=False))
     if settings.publish.mode == "auto":
-        out.append(Check("publish mode", WARN, "auto — finished videos go live without review",
+        out.append(Check("publish mode", WARN,
+                         "auto — finished videos go live without review",
                          "set publish.mode: draft to park them instead", required=False))
     return out
 
 
-def _agent(settings) -> Check:
-    provider = settings.agent.provider
-    if provider in ("", "none"):
-        return Check("agent", WARN, "disabled — write specs yourself", required=False)
-    if provider == "claude_code":
-        found = shutil.which("claude")
-        return Check("agent", OK if found else FAIL, found or "claude CLI not on PATH",
-                     "install Claude Code, or set agent.provider: none", required=False)
-    return Check("agent", FAIL, f"unknown provider {provider!r}",
-                 "Phase 1 ships 'claude_code' and 'none'", required=False)
+def _agent(settings) -> list[Check]:
+    out = [_installed(plugins.LLM),
+           _plugin(plugins.LLM, settings.agent.provider, "agent",
+                   hint="write specs yourself and use `creatoros run --skip-agent`")]
+    if settings.agent.provider not in ("", "none"):
+        try:
+            backend = plugins.load(plugins.LLM, settings.agent.provider)
+            if not getattr(backend, "agentic", False):
+                out.append(Check("  research", WARN,
+                                 f"{backend.name} cannot run the research agent",
+                                 "use claude_code for the daily run; this backend can still "
+                                 "write a spec from a topic you give it", required=False))
+        except plugins.PluginError:
+            pass
+    return out
+
+
+def _style(settings) -> list[Check]:
+    from ..core import brand as brand_mod
+
+    out = [_plugin(plugins.STYLE, settings.style, "style")]
+    try:
+        kit = brand_mod.load(settings.brand_path)
+    except brand_mod.BrandError as exc:
+        out.append(Check("brand", FAIL, str(exc).split(".")[0],
+                         f"available: {', '.join(brand_mod.available()) or '(none)'}",
+                         required=False))
+        return out
+    detail = f"{kit.name} ({kit.source})"
+    if not kit.logo:
+        detail += " · no logo, rendering the wordmark"
+    out.append(Check("brand", OK, detail, required=False))
+    return out
+
+
+def _gates(settings) -> list[Check]:
+    if not settings.gates:
+        return [Check("gates", WARN, "none enabled",
+                      f"available: {', '.join(plugins.names(plugins.GATE)) or '(none)'}",
+                      required=False)]
+    out = []
+    for name in settings.gates:
+        try:
+            gate = plugins.load(plugins.GATE, name)
+            out.append(Check(f"gate {name}", OK,
+                             "advisory" if getattr(gate, "advisory", False) else "blocking",
+                             required=False))
+        except plugins.PluginError as exc:
+            out.append(Check(f"gate {name}", FAIL, str(exc).split(".")[0], required=False))
+    return out
 
 
 def collect(settings=None, source: str = "") -> list[Check]:
@@ -168,9 +245,11 @@ def collect(settings=None, source: str = "") -> list[Check]:
         source = settings_mod.source_of(settings)
     checks = [_python(), *_imports(), *_ffmpeg(), _package_data()]
     checks += _config(settings, source or settings_mod.source_of(settings))
+    checks += _style(settings)
     checks += _narration(settings)
     checks += _publishing(settings)
-    checks.append(_agent(settings))
+    checks += _agent(settings)
+    checks += _gates(settings)
     return checks
 
 

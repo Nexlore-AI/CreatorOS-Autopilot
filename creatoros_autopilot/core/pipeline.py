@@ -78,6 +78,67 @@ def rendered_videos(job_dir: Path) -> list[tuple[int, Path]]:
 FAILED_STATUSES = {"failed", "error", "rejected", "cancelled"}
 
 
+def _routes(platforms: list[str], preferred, override) -> dict:
+    """backend name -> (backend, the platforms it will handle).
+
+    Keyed on the backend's *name*, not the object. The registry builds a fresh instance per
+    lookup, so keying on identity gave one route per platform — and for Zernio, whose whole
+    advantage is that one upload serves both platforms, that would mean uploading the same
+    video twice and creating two posts where there was one.
+    """
+    from .. import plugins
+
+    routes: dict = {}
+    for platform in platforms:
+        backend = override or plugins.publisher_for(platform, preferred or ())
+        key = getattr(backend, "name", None) or id(backend)
+        routes.setdefault(key, (backend, []))[1].append(platform)
+    return routes
+
+
+def _publish_via(routes: dict, video, job_id: str, pending: list[str], decision,
+                 settings, dry_run: bool):
+    """Call each backend once with the platforms it owns, and merge the outcomes."""
+    from ..interfaces import PlatformOutcome, PublishRequest, PublishResult
+    from . import spec as spec_mod
+
+    spec = {}
+    sibling = Path(video).with_suffix(".json")
+    if sibling.is_file():
+        try:
+            spec = spec_mod.load(sibling)
+        except Exception:
+            spec = {}
+
+    outcomes, ok, post_id, practice = [], True, "", set()
+    for backend, owned in routes.values():
+        mine = [p for p in pending if p in owned]
+        if not mine:
+            continue
+        request = PublishRequest(
+            video=str(video), job_id=job_id, platforms=tuple(mine), mode=decision.mode,
+            at=None if decision.at is None else _iso(decision.at), tz=settings.timezone,
+            spec=spec, dry_run=dry_run)
+        res = backend.publish(request)
+        post_id = post_id or res.post_id
+        ok = ok and res.ok
+        if not getattr(backend, "records_publication", True):
+            practice.update(mine)
+        for platform in mine:
+            found = res.outcome_for(platform)
+            outcomes.append(found or PlatformOutcome(platform, res.ok))
+    result = PublishResult(ok=ok, mode=decision.mode, post_id=post_id,
+                           outcomes=outcomes, dry_run=dry_run)
+    # Platforms handled by a practice backend: nothing was posted, so nothing may be
+    # recorded as done.
+    result.practice = practice
+    return result
+
+
+def _iso(moment):
+    return sched.isoformat(moment)
+
+
 def _platform_ok(result, status: dict | None) -> bool:
     """Whether one platform inside a multi-platform post actually succeeded.
 
@@ -120,10 +181,11 @@ def publish_day(settings: Settings, date: str, *, dry_run: bool = False,
 
     Idempotency is per `(job_id, platform)`, so a run that posted to YouTube and failed on
     Instagram retries Instagram alone instead of posting the video twice or not at all.
-    """
-    from ..providers.publish import zernio
 
-    publisher = publisher or zernio
+    The publisher is resolved from the registry per platform, never imported here. That is
+    the rule the plugin system exists to enforce: adding a publisher must not mean editing
+    this file. `publisher=` is for tests and for a caller that already has one.
+    """
     result = RunResult(date=date)
     job_dir = settings.job_dir(date)
     videos = rendered_videos(job_dir)
@@ -137,6 +199,16 @@ def publish_day(settings: Settings, date: str, *, dry_run: bool = False,
         result.state = "nothing-to-publish"
         result.message = ("publish.platforms is empty, so nothing is published. "
                           f"The {len(videos)} rendered video(s) are in {job_dir}.")
+        return result
+
+    # Group the platforms by which backend reaches them, so one upload serves every
+    # platform a single backend can publish to — and two backends mean two calls, not one
+    # call that silently drops a platform.
+    try:
+        routes = _routes(platforms, settings.publish.backends, publisher)
+    except Exception as exc:
+        result.state = "failed"
+        result.message = str(exc)
         return result
 
     times = sched.parse_times(settings.publish.post_times)
@@ -165,31 +237,31 @@ def publish_day(settings: Settings, date: str, *, dry_run: bool = False,
         print(f"slot {slot}: {video.name} -> {', '.join(pending)} @ {when}  ({decision.reason})")
 
         try:
-            res = publisher.publish(
-                str(video), pending, decision.mode,
-                at=sched.isoformat(decision.at) if decision.at else None,
-                tz=settings.timezone,
-                yt_visibility=settings.publish.youtube.visibility,
-                yt_category=settings.publish.youtube.category_id,
-                dry_run=dry_run,
-            )
+            res = _publish_via(
+                routes, video, job_id, pending, decision, settings, dry_run)
             # Zernio answers per platform, and can create the post while one platform
             # fails inside it (HTTP 207). Recording a blanket result would then either
             # lose a real failure or re-post a platform that already succeeded, so each
             # platform's row is written from its own status.
-            statuses = {e.get("platform"): e for e in (getattr(res, "platforms", None) or [])}
-            ok_by_platform = {p: _platform_ok(res, statuses.get(p)) for p in pending}
+            practice = getattr(res, "practice", set())
+            ok_by_platform = {p: res.ok_for(p) for p in pending}
             item.ok = bool(res.ok) and all(ok_by_platform.values())
             item.platforms = [p for p, ok in ok_by_platform.items() if ok]
             if not dry_run:
                 for platform in pending:
-                    entry = statuses.get(platform) or {}
+                    if platform in practice:
+                        # Handled by a backend that does not publish. Writing an ok row
+                        # here would mark the job done and the real publisher would skip
+                        # it forever — a practice run consuming a real one.
+                        print(f"  . {platform}: written, not published — not recorded")
+                        continue
+                    found = res.outcome_for(platform)
                     ledger.record(Entry(
                         job_id=job_id, platform=platform, ok=ok_by_platform[platform],
                         mode=decision.mode, when=when, file=str(video),
-                        title=_title_for(video), post_id=getattr(res, "post_id", ""),
+                        title=_title_for(video), post_id=res.post_id,
                         post_url=res.url_for(platform),
-                        error=str(entry.get("error") or entry.get("errorCategory") or ""),
+                        error=(found.error if found else ""),
                     ))
         except Exception as exc:
             item.ok, item.error = False, f"{type(exc).__name__}: {exc}"
@@ -246,21 +318,30 @@ def run(settings: Settings, *, date: str | None = None, if_due: bool = False,
 
 
 def _run_agent(settings: Settings, date: str, job_dir: Path) -> None:
+    from .. import agents, plugins
+
     if settings.agent.provider in ("", "none"):
         print("agent: disabled (agent.provider is none)")
         return
-    if settings.agent.provider != "claude_code":
-        raise ValueError(
-            f"unknown agent provider {settings.agent.provider!r}. Phase 1 ships "
-            "'claude_code' and 'none'; more arrive with the plugin system in Phase 2."
+    backend = plugins.load(plugins.LLM, settings.agent.provider)
+    ready = backend.available()
+    if not ready:
+        raise RuntimeError(f"agent backend {backend.name!r}: {ready.detail}. {ready.fix}")
+    if not getattr(backend, "agentic", False):
+        # Honest refusal rather than a loop pretending to be an agent. A local model that
+        # cannot search the web or read files produces a worse video and a much longer
+        # debugging session than one that says so.
+        raise RuntimeError(
+            f"{backend.name!r} cannot run the research agent (it is not agentic). Use "
+            f"agent.provider: claude_code for the daily run, or write specs yourself and "
+            f"use `creatoros run --skip-agent`."
         )
-    from ..agents import claude_code
-
-    code = claude_code.run(
-        {"DATE": date, "OUT": str(job_dir), "VIDEOS_PER_DAY": settings.content.videos_per_day},
-        prompt=settings.agent.prompt or None,
+    code = backend.run_agent(
+        agents.prompt_text(settings.agent.prompt or None),
+        {"DATE": date, "OUT": str(job_dir),
+         "VIDEOS_PER_DAY": settings.content.videos_per_day},
         max_turns=settings.agent.max_turns,
-        cwd=settings.workspace_dir,
+        cwd=str(settings.workspace_dir),
     )
     print(f"agent finished rc={code}")
 

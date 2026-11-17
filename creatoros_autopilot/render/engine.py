@@ -50,6 +50,7 @@ from multiprocessing import Pool
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
+from ..core import brand as brand_mod
 from ..core import media
 from ..core import spec as spec_mod
 
@@ -74,21 +75,72 @@ X0 = 90
 SAFE_BOTTOM = 1500          # Shorts UI covers below this
 
 def _h(x): return tuple(int(x[i:i + 2], 16) for i in (1, 3, 5))
-NIGHT = _h("#0B0A1C"); WHITE = (255, 255, 255); HAZE = _h("#9AA0BC"); SOFT = _h("#C9CDE0")
-CYAN = _h("#0ED1D3"); BLUE = _h("#298AB4"); INDIGO = _h("#4C52B2"); DVIOLET = _h("#580CA3")
-VIOLET = _h("#AC86D1"); SURFACE = _h("#16152F"); CARD = _h("#1F1D3F"); BORDER = _h("#2E2B55")
-GRAD = [(0.0, CYAN), (0.35, BLUE), (0.68, INDIGO), (1.0, DVIOLET)]
-NAMED = {"cyan": CYAN, "blue": BLUE, "indigo": INDIGO, "violet": VIOLET, "green": _h("#10B981"),
-         "amber": _h("#F5A524"), "red": _h("#F0506E")}
-def named(c, default=INDIGO): return NAMED.get(c, default) if isinstance(c, str) else default
 
-_fc = {}
+#: The brand this process renders with. Module-level because the drawing code reads these
+#: colours inside per-frame loops and threading a brand object through every helper would
+#: cost more in noise than it buys. `apply_brand` rebinds them; `_render` re-applies in each
+#: worker, since a spawned process gets a fresh import rather than a copy of this state.
+BRAND = None
+
+NIGHT = WHITE = HAZE = SOFT = CYAN = BLUE = INDIGO = DVIOLET = None
+VIOLET = SURFACE = CARD = BORDER = None
+GRAD: list = []
+NAMED: dict = {}
+FONT_FILES: dict = {}
+
+
+def _identity(kit) -> tuple:
+    """What makes two brands different to the renderer."""
+    return (kit.name, kit.tagline, str(kit.logo or ""), kit.cta,
+            tuple(sorted(kit.palette.colours.items())), tuple(sorted(kit.fonts.items())))
+
+
+def apply_brand(kit=None):
+    """Point the renderer at a brand kit.
+
+    Clears the cached background, grid, logo and gradient bar **only when the brand
+    actually changes**: those are built from the palette and the logo, so keeping them
+    across a change would draw the previous channel's colours under the new one's text —
+    but clearing them unconditionally rebuilt a 2160x3840 float array once per scene
+    instead of once per worker, which took the test suite from two minutes to over nine.
+    """
+    global BRAND, NIGHT, WHITE, HAZE, SOFT, CYAN, BLUE, INDIGO, DVIOLET
+    global VIOLET, SURFACE, CARD, BORDER, GRAD, NAMED, FONT_FILES
+    kit = kit or brand_mod.BrandKit()
+    changed = BRAND is None or _identity(kit) != _identity(BRAND)
+    BRAND = kit
+    p = BRAND.palette
+    NIGHT, WHITE, HAZE, SOFT = p.background, p.text, p.muted, p.soft
+    CYAN, BLUE, INDIGO, DVIOLET = p.accent, p.accent_2, p.accent_3, p.accent_4
+    VIOLET, SURFACE, CARD, BORDER = p.violet, p.surface, p.card, p.border
+    GRAD = p.gradient
+    NAMED = p.named
+    FONT_FILES = dict(BRAND.fonts)
+    if changed:
+        G.clear()
+        _fc.clear()
+    return BRAND
+
+
+def named(c, default=None):
+    return NAMED.get(c, default or INDIGO) if isinstance(c, str) else (default or INDIGO)
+
+
+G: dict = {}
+_fc: dict = {}
+apply_brand()      # bind the module colours before anything draws
+
 def F(name, size):
     k = (name, size)
     if k not in _fc:
-        fn = {"black": "InterDisplay-Black.otf", "bold": "Inter-Bold.otf", "semi": "Inter-SemiBold.otf",
-              "reg": "Inter-Regular.otf", "mono": "DejaVuSansMono-Bold.ttf"}[name]
-        _fc[k] = ImageFont.truetype(os.path.join(FONTS, fn), int(size * SS))
+        fn = FONT_FILES.get(name) or brand_mod.DEFAULT_FONTS[name]
+        path = fn if os.path.isabs(fn) else os.path.join(FONTS, fn)
+        if not os.path.isfile(path):
+            # A brand naming a font that is not there gets the bundled one and a warning.
+            # A missing typeface is a plainer video; it is not a reason to lose the day.
+            print(f"!! font {fn!r} not found — falling back to {brand_mod.DEFAULT_FONTS[name]}")
+            path = os.path.join(FONTS, brand_mod.DEFAULT_FONTS[name])
+        _fc[k] = ImageFont.truetype(path, int(size * SS))
     return _fc[k]
 
 def s(*v): return [int(round(x * SS)) for x in v]
@@ -110,18 +162,17 @@ def grad_img(w, h):
     return Image.fromarray(np.repeat(row[None, :, :], h, 0))
 
 # ------------------------------------------------------------------ background
-G = {}
 def init():
     if G: return
     yy, xx = np.mgrid[0:HH, 0:WW].astype(np.float32)
     base = np.zeros((HH, WW, 3), np.float32)
     k = (yy / HH)[..., None]
-    base += np.array(NIGHT, np.float32) * (1 - k) + np.array(_h("#120E33"), np.float32) * k
+    base += np.array(NIGHT, np.float32) * (1 - k) + np.array(BRAND.palette.background_low, np.float32) * k
     def glow(cx, cy, r, col, amt):
         d = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / r
         return np.exp(-d ** 2 * 2.2)[..., None] * amt * (np.array(col, np.float32) - base)
-    base += glow(WW * 0.55, HH * 0.12, WW * 0.75, _h("#0B4F63"), 0.55)
-    base += glow(WW * 0.1, HH * 0.92, WW * 0.85, _h("#3A1478"), 0.55)
+    base += glow(WW * 0.55, HH * 0.12, WW * 0.75, BRAND.palette.glow_top, 0.55)
+    base += glow(WW * 0.1, HH * 0.92, WW * 0.85, BRAND.palette.glow_bottom, 0.55)
     d = np.sqrt(((xx - WW / 2) / (WW / 2)) ** 2 + ((yy - HH / 2) / (HH / 2)) ** 2)
     base *= (1 - 0.35 * np.clip(d - 0.6, 0, 1))[..., None]
     G["bg"] = Image.fromarray(np.clip(base, 0, 255).astype(np.uint8))
@@ -133,15 +184,38 @@ def init():
     m = np.clip(1.15 - np.sqrt(((xx2 - WW / 2) / (WW * 0.75)) ** 2 + ((yy2 - HH * 0.75) / (HH * 0.75)) ** 2), 0, 1)
     g.putalpha(Image.fromarray((np.array(g.split()[3], np.float32) * m).astype(np.uint8)))
     G["grid"] = g
-    ic = Image.open(os.path.join(ASSETS, "nexlore-icon-512.png")).convert("RGBA"); G["icon"] = ic.crop(ic.getbbox())
+    G["icon"] = _load_logo()
     G["bar"] = grad_img(W * SS, 6 * SS)
     rnd = random.Random(11)
     G["stars"] = [(rnd.uniform(0, W), rnd.uniform(0, H), rnd.uniform(0.8, 2.2), rnd.uniform(0, 6.28), rnd.uniform(4, 14)) for _ in range(80)]
 
+def _load_logo():
+    """The brand's logo, or None.
+
+    None is a supported answer and the common one: most brands will not have supplied a
+    mark. The engine used to open a specific PNG unconditionally in init(), so any brand
+    without that exact file crashed before the first frame.
+    """
+    path = BRAND.logo
+    if not path:
+        return None
+    try:
+        image = Image.open(path).convert("RGBA")
+        return image.crop(image.getbbox())
+    except Exception as exc:
+        print(f"!! could not read the logo at {path} ({type(exc).__name__}) — "
+              f"using the wordmark instead")
+        return None
+
+
 def icon(h):
+    """The logo at a given height, or None when the brand has no logo."""
+    if G.get("icon") is None:
+        return None
     key = ("icon", h)
     if key not in G:
-        hh = int(h * SS); ic = G["icon"]; G[key] = ic.resize((int(ic.width * hh / ic.height), hh), Image.LANCZOS)
+        hh = int(h * SS); ic = G["icon"]
+        G[key] = ic.resize((int(ic.width * hh / ic.height), hh), Image.LANCZOS)
     return G[key]
 
 def background(T):
@@ -224,9 +298,13 @@ def bezier(p0, p1, p2, n=48):
              (1 - u) ** 2 * p0[1] + 2 * (1 - u) * u * p1[1] + u * u * p2[1]) for u in (i / n for i in range(n + 1))]
 
 def header(im, d, T, total, tag):
-    ic = icon(46); im.paste(ic, s(X0, 86), ic)
-    d.text(s(X0 + ic.width / SS + 14, 109), "Nexlore AI", font=F("black", 34), fill=WHITE, anchor="lm")
-    tag = (tag or "AI EXPLAINED").upper(); f = F("bold", 21)
+    ic = icon(46)
+    x = X0
+    if ic is not None:
+        im.paste(ic, s(X0, 86), ic)
+        x = X0 + ic.width / SS + 14
+    d.text(s(x, 109), BRAND.name, font=F("black", 34), fill=WHITE, anchor="lm")
+    tag = (tag or BRAND.tagline or BRAND.name).upper(); f = F("bold", 21)
     w = tw(d, tag, f) + 40; x1 = W - X0
     d.rounded_rectangle(s(x1 - w, 88, x1, 130), radius=21 * SS, fill=C(CARD, 0.85), outline=C(INDIGO, 0.9), width=2 * SS)
     d.text(s(x1 - w / 2, 109), tag, font=f, fill=SOFT, anchor="mm")
@@ -589,16 +667,20 @@ def sc_cta(im, d, t, D, A, sc):
         text(d, (X0, 680 + 20 * (1 - ramp(t, 0.5, 0.5))), sc["sub"], fit(d, sc["sub"], "semi", 50, W - 2 * X0), HAZE, A * ramp(t, 0.5, 0.5))
     pb = ease_back(clamp((t - 0.9) / 0.5)); pa = clamp((t - 0.9) / 0.3)
     if pa > 0:
-        fb = F("bold", 46); lbl = sc.get("button", "Follow Nexlore AI"); bw = tw(d, lbl, fb) + 110; yb = 820 + 20 * (1 - pb)
+        fb = F("bold", 46); lbl = sc.get("button") or BRAND.cta_label; bw = tw(d, lbl, fb) + 110; yb = 820 + 20 * (1 - pb)
         grad_rect(im, (X0, yb, X0 + bw, yb + 116), 58, A * pa)
         d.rounded_rectangle(s(X0 + 4, yb + 4, X0 + bw - 4, yb + 112), radius=54 * SS, fill=C(NIGHT, 0.82 * A * pa))
         text(d, (X0 + bw / 2, yb + 58), lbl, fb, WHITE, A * pa, anchor="mm")
     pl = ramp(t, 1.3, 0.6)
     if pl > 0:
-        ic = icon(150); m = ic.split()[3].point(lambda v: int(v * A * pl)); yy = 1120 + 30 * (1 - pl)
-        im.paste(ic, s(X0, yy), m)
-        text(d, (X0 + ic.width / SS + 34, yy + 75), "Nexlore AI", F("black", 76), WHITE, A * pl, anchor="lm")
-        text(d, (X0 + ic.width / SS + 36, yy + 140), "One AI idea. Explained daily.", F("semi", 34), CYAN, A * pl, anchor="lm")
+        ic = icon(150); yy = 1120 + 30 * (1 - pl); x = X0
+        if ic is not None:
+            m = ic.split()[3].point(lambda v: int(v * A * pl))
+            im.paste(ic, s(X0, yy), m)
+            x = X0 + ic.width / SS + 34
+        text(d, (x, yy + 75), BRAND.name, F("black", 76), WHITE, A * pl, anchor="lm")
+        if BRAND.tagline:
+            text(d, (x + 2, yy + 140), BRAND.tagline, F("semi", 34), CYAN, A * pl, anchor="lm")
 
 SCENES = {"hook": (sc_hook, 4.0), "stack": (sc_stack, 4.2), "section": (sc_section, 7.0), "predict": (sc_predict, 7.0),
           "points": (sc_points, 6.0), "stat": (sc_stat, 5.0), "cta": (sc_cta, 4.5)}
@@ -625,7 +707,11 @@ def frame(spec, k, t, D, g0, total):
     return im.resize((W, H), Image.LANCZOS)
 
 def _render(args):
-    spec, k, D, g0, total, out = args
+    spec, k, D, g0, total, out, kit = args
+    # A spawned worker re-imports this module, so it starts on the default brand. macOS and
+    # Windows both spawn; only Linux would have inherited the parent's state, which is
+    # exactly the kind of difference that makes a bug appear on one platform only.
+    apply_brand(kit)
     tmp = out[:-4] + ".tmp.mp4"
     p = subprocess.Popen([media.require("ffmpeg"), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
                           "-i", "-", "-c:v", "libx264", "-preset", "medium", "-crf", "15", "-pix_fmt", "yuv420p", "-r", str(FPS), tmp],
@@ -664,7 +750,7 @@ def validate(spec, path=None):
     for warning in spec_mod.validate_render(spec, path):
         print("!!", warning)
 
-def run(mode, spec_path, out=None):
+def run(mode, spec_path, out=None, kit=None):
     """`mode` is "preview" or "render". Returns the path written.
 
     Every artifact — the scene intermediates, the cover frame — is written beside `out`,
@@ -673,6 +759,7 @@ def run(mode, spec_path, out=None):
     it was how `creatoros render /app/examples/specs/kv-cache.json -o /workspace/out.mp4`
     failed with a permission error on a path the user never named.
     """
+    apply_brand(kit)
     spec_path = os.path.abspath(spec_path)
     spec = spec_mod.load(spec_path); validate(spec, spec_path)
     durs, offs, total = timeline(spec, spec_path)
@@ -690,7 +777,8 @@ def run(mode, spec_path, out=None):
     out = out or (base + ".mp4")
     os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
     work = base + "_scenes"; os.makedirs(work, exist_ok=True)
-    jobs = [(spec, k, D, g0, total, os.path.join(work, f"{k + 1:02d}.mp4")) for k, (D, g0) in enumerate(zip(durs, offs))]
+    jobs = [(spec, k, D, g0, total, os.path.join(work, f"{k + 1:02d}.mp4"), BRAND)
+            for k, (D, g0) in enumerate(zip(durs, offs))]
     with Pool(min(os.cpu_count() or 4, 8)) as pool:
         for k in pool.imap_unordered(_render, sorted(jobs, key=lambda j: -j[2])): print("scene", k + 1, "done", flush=True)
     with open(os.path.join(work, "list.txt"), "w") as f:

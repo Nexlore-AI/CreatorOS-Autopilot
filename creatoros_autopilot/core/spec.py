@@ -102,8 +102,15 @@ def validate_render(spec: dict, path: str | os.PathLike | None = None) -> list[s
     return warnings
 
 
-def validate_publish(spec: dict, platforms: list[str], path: str | os.PathLike | None = None) -> list[str]:
-    """Raise on missing metadata for the platforms being published to."""
+def validate_publish(spec: dict, platforms: list[str], path: str | os.PathLike | None = None,
+                     requires=None) -> list[str]:
+    """Raise on missing metadata for the platforms being published to.
+
+    `requires(platform) -> tuple[str, ...]` comes from the publisher that will actually
+    handle the platform. Core used to hold that table itself, with `if platform ==
+    "youtube"` branches, which meant a new platform meant editing core. Without a
+    `requires` the only check is that the spec can be identified in the ledger.
+    """
     problems = []
     if not job_id(spec, path):
         problems.append("no 'id': a spec needs one to be recorded in the ledger")
@@ -116,15 +123,16 @@ def validate_publish(spec: dict, platforms: list[str], path: str | os.PathLike |
         if not isinstance(entry, dict):
             problems.append(f"platforms.{platform} must be an object")
             continue
-        if platform == "youtube":
-            for key in ("title", "description", "tags"):
-                if not entry.get(key):
-                    problems.append(f"platforms.youtube.{key} is missing")
-        elif platform == "instagram":
-            # An Instagram Reel with no caption gets no reach and cannot be found, so
-            # this stays an error rather than a warning.
-            if not str(entry.get("caption") or "").strip():
-                problems.append("platforms.instagram.caption is missing or empty")
+        needed = ()
+        if requires is not None:
+            try:
+                needed = requires(platform) or ()
+            except Exception:
+                needed = ()
+        for key in needed:
+            if not str(entry.get(key) or "").strip() if isinstance(entry.get(key), str) \
+                    else not entry.get(key):
+                problems.append(f"platforms.{platform}.{key} is missing or empty")
     if problems:
         raise SpecError(problems, str(path) if path else None)
     return []

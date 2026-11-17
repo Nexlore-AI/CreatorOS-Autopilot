@@ -32,40 +32,67 @@ def _settings(args):
 
 
 # ------------------------------------------------------------------- commands
-def cmd_render(args) -> int:
-    from ..render import engine
+def _style_and_brand(settings):
+    from .. import plugins
+    from ..core import brand as brand_mod
 
-    _settings(args)
-    engine.run("render", args.spec, args.out)
+    style = plugins.load(plugins.STYLE, settings.style)
+    kit = brand_mod.load(settings.brand_path)
+    return style, kit
+
+
+def cmd_render(args) -> int:
+    from ..core import spec as spec_mod
+
+    settings = _settings(args)
+    style, kit = _style_and_brand(settings)
+    style.render(spec_mod.load(args.spec), Path(args.spec),
+                 Path(args.out) if args.out else None, brand=kit)
     return 0
 
 
 def cmd_preview(args) -> int:
-    from ..render import engine
+    from ..core import spec as spec_mod
 
-    _settings(args)
-    engine.run("preview", args.spec, args.out)
+    settings = _settings(args)
+    style, kit = _style_and_brand(settings)
+    style.preview(spec_mod.load(args.spec), Path(args.spec),
+                  Path(args.out) if args.out else None, brand=kit)
     return 0
 
 
 def cmd_audio(args) -> int:
-    from ..providers.tts import elevenlabs
+    from .. import plugins
+    from ..core import music, narrate
+    from ..core import spec as spec_mod
 
     settings = _settings(args)
     if settings.tts.backend in ("", "none"):
-        print("tts.backend is none — nothing to generate. Set it in creatoros.yaml.", file=sys.stderr)
+        print("tts.backend is none — nothing to generate. Set it in creatoros.yaml "
+              "(piper is free and runs locally).", file=sys.stderr)
         return 1
-    spec, problems = elevenlabs.narrate(args.spec, voice_id=settings.tts.voice_id,
-                                        model=settings.tts.model)
-    elevenlabs.pick_music(spec, args.spec, music_dir=settings.music_dir, mode=settings.music.mode)
-    if problems:
-        print("voice problems:\n  " + "\n  ".join(problems), file=sys.stderr)
+    backend = plugins.load(plugins.TTS, settings.tts.backend)
+    ready = backend.available()
+    if not ready:
+        print(f"creatoros: {backend.name}: {ready.detail}"
+              + (f"\n  -> {ready.fix}" if ready.fix else ""), file=sys.stderr)
+        return 1
+    spec = spec_mod.load(args.spec)
+    result = narrate.narrate(spec, args.spec, backend,
+                             voice=settings.tts.voice_id, model=settings.tts.model)
+    print(result.summary())
+    music.choose(spec, args.spec, music_dir=settings.music_dir,
+                 mode=settings.music.mode, backend=backend)
+    if result.problems:
+        print("voice problems:\n  " + "\n  ".join(result.problems), file=sys.stderr)
         return 1
     return 0
 
 
 def cmd_publish(args) -> int:
-    from ..providers.publish import zernio
+    from .. import plugins
+    from ..core import spec as spec_mod
+    from ..interfaces import PublishRequest
 
     settings = _settings(args)
     platforms = ([p.strip() for p in args.platforms.split(",") if p.strip()]
@@ -74,16 +101,32 @@ def cmd_publish(args) -> int:
         print("no platforms: pass --platforms or set publish.platforms in creatoros.yaml",
               file=sys.stderr)
         return 1
-    try:
-        res = zernio.publish(args.video, platforms, args.mode, at=args.at,
-                             tz=args.tz or settings.timezone,
-                             yt_visibility=settings.publish.youtube.visibility,
-                             yt_category=settings.publish.youtube.category_id,
-                             dry_run=args.dry_run)
-    except Exception as exc:
-        print(f"publish failed: {exc}", file=sys.stderr)
-        return 1
-    return 0 if res.ok else 1
+    sibling = Path(args.video).with_suffix(".json")
+    spec = spec_mod.load(sibling) if sibling.is_file() else {}
+    ok = True
+    # One call per backend, with the platforms that backend actually reaches.
+    by_backend: dict = {}
+    for platform in platforms:
+        backend = plugins.publisher_for(platform, settings.publish.backends)
+        by_backend.setdefault(backend.name, (backend, []))[1].append(platform)
+    for backend, owned in by_backend.values():
+        request = PublishRequest(
+            video=args.video, job_id=spec_mod.job_id(spec, sibling),
+            platforms=tuple(owned), mode=args.mode, at=args.at,
+            tz=args.tz or settings.timezone, spec=spec, dry_run=args.dry_run)
+        try:
+            res = backend.publish(request)
+        except Exception as exc:
+            print(f"creatoros: {backend.name}: {exc}", file=sys.stderr)
+            ok = False
+            continue
+        for outcome in res.outcomes:
+            mark = "+" if outcome.ok else "x"
+            print(f"  {mark} {outcome.platform} via {backend.name}"
+                  + (f"  {outcome.url}" if outcome.url else "")
+                  + (f"  {outcome.error}" if outcome.error else ""))
+        ok = ok and res.ok
+    return 0 if ok else 1
 
 
 def cmd_run(args) -> int:
@@ -131,6 +174,36 @@ def cmd_status(args) -> int:
               f"  pending={','.join(pending) or '-'}")
     stamp = job_dir / pipeline.STAMP
     print(f"published    : {stamp.read_text(encoding='utf-8').strip() if stamp.is_file() else 'no'}")
+    return 0
+
+
+def cmd_init(args) -> int:
+    from . import init_wizard
+
+    console = init_wizard.Console(assume=args.yes)
+    return init_wizard.run(console, Path(args.directory or Path.cwd()),
+                           force=args.force, preset=args.preset or "")
+
+
+def cmd_brands(args) -> int:
+    from ..core import brand as brand_mod
+
+    names = brand_mod.available()
+    if not names:
+        print("no brand kits found. They are YAML files in ./brands/ or your config "
+              "directory; some ship with CreatorOS.")
+        return 0
+    settings = _settings(args)
+    for name in names:
+        try:
+            kit = brand_mod.load(name)
+        except brand_mod.BrandError as exc:
+            print(f"  x {name}: {exc}")
+            continue
+        mark = "*" if name == settings.brand else " "
+        print(f"{mark} {name:18s} {kit.name}"
+              + (f" — {kit.tagline}" if kit.tagline else "")
+              + ("" if kit.logo else "  (wordmark, no logo)"))
     return 0
 
 
@@ -213,6 +286,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_p = sub.add_parser("doctor", help="check dependencies, config, keys and accounts")
     doctor_p.set_defaults(func=cmd_doctor)
+
+    init_p = sub.add_parser("init", help="set up creatoros.yaml and .env")
+    init_p.add_argument("directory", nargs="?", help="where to write (default: here)")
+    init_p.add_argument("--yes", action="store_true",
+                        help="take every default; never prompt")
+    init_p.add_argument("--force", action="store_true", help="replace an existing config")
+    init_p.add_argument("--preset", help="start from a shipped preset")
+    init_p.set_defaults(func=cmd_init)
+
+    brands_p = sub.add_parser("brands", help="list the brand kits that are available")
+    brands_p.set_defaults(func=cmd_brands)
 
     schedule = sub.add_parser("schedule", help="install the daily job (launchd/systemd/schtasks)")
     schedule.add_argument("action", choices=["show", "install", "remove"], nargs="?", default="show")
