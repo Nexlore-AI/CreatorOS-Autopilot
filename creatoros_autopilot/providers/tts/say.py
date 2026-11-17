@@ -263,7 +263,7 @@ def _discard(path: Path) -> None:
         pass
 
 
-def _speech_argv(rate: int, out: Path, voice: str, line: str) -> list[str]:
+def _speech_argv(rate: int, out: Path, voice: str, line: str, *, text_file: Path | None = None) -> list[str]:
     """One `say` command line, built the same way for a probe and for a real clip.
 
     The data format is pinned so the intermediate is plain PCM at the rate the voices
@@ -275,10 +275,16 @@ def _speech_argv(rate: int, out: Path, voice: str, line: str) -> list[str]:
     shell, but `say` still parses it for options: without the terminator, "-20 percent is
     what it actually costs." died with `say: invalid option -- 2` and took the render with
     it, naming neither the scene nor the reason.
+
+    A leading hyphen is still a problem for the real macOS binary even when `--` is used,
+    so the option-shaped cases are fed in through `-f` instead of as raw argv. The file is
+    written by the caller and kept alive until the subprocess exits.
     """
     argv = [BINARY, "-r", str(rate), "-o", str(out), "--data-format=BEI16@22050"]
     if voice:
         argv += ["-v", voice]
+    if text_file is not None:
+        return argv + ["-f", str(text_file)]
     return argv + ["--", line]
 
 
@@ -379,11 +385,17 @@ class Say:
         aiff = Path(f"{out_path}.say.aiff")
         part = Path(f"{out_path}.part")
 
+        text_file: Path | None = None
+        if line.lstrip().startswith("-"):
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+                handle.write(line)
+                text_file = Path(handle.name)
+
         try:
             # Narration is written by a model, so it is full of quotes, dashes and the
             # occasional backtick, and every one of those has to reach the synthesiser as
             # itself — see `_speech_argv` for the two ways that went wrong.
-            _run(_speech_argv(rate, aiff, chosen, line), BINARY)
+            _run(_speech_argv(rate, aiff, chosen, line, text_file=text_file), BINARY)
             if not aiff.is_file() or aiff.stat().st_size == 0:
                 raise SayError(f"`{BINARY}` exited cleanly but wrote no audio with voice "
                                f"{chosen or '(the system default)'}")
@@ -397,6 +409,8 @@ class Say:
             # the video would ship with a truncated line.
             os.replace(part, out_path)
         finally:
+            if text_file is not None:
+                _discard(text_file)
             _discard(aiff)
             _discard(part)
         return out_path
@@ -438,22 +452,32 @@ class Say:
         exactly what this is looking for — so the reason is returned to be quoted in the
         refusal rather than raised from here.
         """
-        with tempfile.TemporaryDirectory(prefix="creatoros-say-") as tmp:
-            aiff = Path(tmp) / "probe.aiff"
-            try:
-                done = subprocess.run(_speech_argv(PROBE_RATE, aiff, voice, sample),
-                                      capture_output=True, text=True, timeout=TIMEOUT)
-            except (OSError, subprocess.SubprocessError) as exc:
-                return False, f"could not be run ({exc})"
-            if done.returncode != 0:
-                return False, (" ".join((done.stderr or "").split())[:120]
-                               or f"exit {done.returncode}")
-            if not aiff.is_file() or aiff.stat().st_size == 0:
-                return False, "wrote no audio"
-            try:
-                spoken = media.duration(str(aiff))
-            except Exception:
-                return False, "wrote audio ffprobe cannot read"
+        text_file: Path | None = None
+        if sample.lstrip().startswith("-"):
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+                handle.write(sample)
+                text_file = Path(handle.name)
+        try:
+            with tempfile.TemporaryDirectory(prefix="creatoros-say-") as tmp:
+                aiff = Path(tmp) / "probe.aiff"
+                try:
+                    done = subprocess.run(_speech_argv(PROBE_RATE, aiff, voice, sample,
+                                                      text_file=text_file), capture_output=True,
+                                          text=True, timeout=TIMEOUT)
+                except (OSError, subprocess.SubprocessError) as exc:
+                    return False, f"could not be run ({exc})"
+                if done.returncode != 0:
+                    return False, (" ".join((done.stderr or "").split())[:120]
+                                   or f"exit {done.returncode}")
+                if not aiff.is_file() or aiff.stat().st_size == 0:
+                    return False, "wrote no audio"
+                try:
+                    spoken = media.duration(str(aiff))
+                except Exception:
+                    return False, "wrote audio ffprobe cannot read"
+        finally:
+            if text_file is not None:
+                _discard(text_file)
         needed = max(PROBE_FLOOR, PROBE_SECONDS_PER_CHAR * len(sample))
         if spoken < needed:
             return False, f"{spoken:.4f}s of audio for {len(sample)} characters"
