@@ -1,7 +1,7 @@
 # CreatorOS Autopilot — Roadmap
 
-**Status:** Phases 1–6 complete (PRs #2–#7); the Phase 6 cutover itself needs Aman at the
-keyboard and has not been performed. Phase 7 is a document. Phase 0's audit stands as written below; findings
+**Status:** All seven phases complete (PRs #2–#8). The Phase 6 **cutover** needs Aman at
+the keyboard and has not been performed; Phase 7 is a design document with no code. Phase 0's audit stands as written below; findings
 it fixed are marked ✅. The four decisions in §6 were answered on
 2026-11-17 and are recorded there. Phases 1–7 are proposed, not started.
 
@@ -500,11 +500,35 @@ the 2026-11-16 specs carry no `platforms.instagram.caption`, which is why
 and shorts-era ledgers use different job-id conventions, which import cleanly but will not
 match if an old reel is ever re-rendered.
 
-### Phase 7 — Hosted platform readiness *(design only)*
-`docs/HOSTED_ARCHITECTURE.md`: API service, job queue, render workers (GPU optional), object
-storage, multi-tenant accounts, OAuth for social accounts, per-user secrets vault, billing
-hooks, usage limits, content moderation, and how the open core and the hosted product share
-code. No implementation.
+### Phase 7 — Hosted platform readiness ✅ *(design only, as specified)*
+
+[`docs/HOSTED_ARCHITECTURE.md`](HOSTED_ARCHITECTURE.md). No code.
+
+Four conclusions worth pulling out, because they are decisions rather than descriptions:
+
+**GPU workers are not useful.** Nothing in the renderer is a matrix operation a GPU would
+accelerate — Pillow draws, NumPy composites, `libx264` encodes. A GPU tier only matters if a
+future style does video diffusion, which is a different product.
+
+**TTS is the variable cost, not CPU.** A render worker produces ~90 seconds of finished video
+per CPU-minute, so a four-a-day tenant costs about two CPU-minutes daily. The same tenant
+costs ~72,000 TTS characters a month, which is above several providers' entry tiers.
+Per-tenant TTS budgeting is a launch requirement, and Piper on a worker is what makes a free
+tier possible at all.
+
+**OAuth review is on the critical path.** The hosted product has to *be* the OAuth app;
+YouTube's `youtube.upload` scope and Instagram's publishing permissions both need platform
+review, measured in weeks. It is the first thing to start and the last thing anyone thinks of.
+
+**Build order matters more than the design.** Steps 2–4 of §9 — one containerised worker, the
+Storage and Queue interfaces, the ledger as a table — are contributions to *this* repo. If
+the web app is built first, the core gets forked within a month and the open-source project
+becomes a demo of the real one.
+
+It also names the question the architecture cannot answer: a hosted service that publishes
+in a creator's name is a publisher in a way a CLI on a laptop is not, and what happens when
+the agent writes something wrong about a real person is a product and legal decision to make
+before launch rather than after the first incident.
 
 ---
 
